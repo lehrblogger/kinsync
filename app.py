@@ -11,7 +11,7 @@ def hello_world():
 
 @app.route('/test')
 def api_call():
-    url = f'https://wanderlog.com/api/tripPlans/{app.config['TRIP_ID']}?clientSchemaVersion=2&registerView=true'
+    url = f"https://wanderlog.com/api/tripPlans/{app.config['TRIP_ID']}?clientSchemaVersion=2&registerView=true"
     response = requests.get(url)
 
     if response.status_code == 200:
