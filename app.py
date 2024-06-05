@@ -19,7 +19,7 @@ def fetch_trip_ids():
     response = requests.get(url, headers=headers)
     response.raise_for_status()
     try:
-       return [trip['key'] for trip in response.json()['tripPlans']]
+       return [trip['key'] for trip in response.json().get('tripPlans', []) if 'key' in trip]
     except KeyError as e:
         print(f"KeyError: The key {e} does not exist where expected in {response.json()}.")
         return []
@@ -30,28 +30,29 @@ def fetch_trip(trip_id):
     response.raise_for_status()
     return response.json()
 
-# def create_ics(trips):
-#     calendar = Calendar()
-      # TODO update this loop
-#     for event in trip_details.get('events', []):
-#         e = Event()
-#         e.name = event.get('title', 'No Title')
-#         e.begin = datetime.fromtimestamp(event.get('startDate') / 1000).isoformat()
-#         e.end = datetime.fromtimestamp(event.get('endDate') / 1000).isoformat()
-#         e.description = event.get('description', '')
-#         calendar.events.add(e)
-#     return calendar
+def create_ics(trips):
+    calendar = Calendar()
+    for trip in trips:
+        for section in trip.get('tripPlan', {}).get('itinerary', {}).get('sections', []):
+            print(section)
+            # e = Event()
+            # e.name = event.get('title', 'No Title')
+            # e.begin = datetime.fromtimestamp(event.get('startDate') / 1000).isoformat()
+            # e.end = datetime.fromtimestamp(event.get('endDate') / 1000).isoformat()
+            # e.description = event.get('description', '')
+            # calendar.events.add(e)
+    return calendar
 
 @app.route('/trips.json')
-def trips():
+def trips_json():
     trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
     return jsonify(trips)
 
-# @app.route('/trips.ics')
-# def trip_ics(trip_id):
-#     trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
-#     calendar = create_ics(trips)
-#     return Response(str(calendar), mimetype='text/calendar')
+@app.route('/trips.ics')
+def trips_ics():
+    trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
+    calendar = create_ics(trips)
+    return Response(str(calendar), mimetype='text/calendar')
 
 if __name__ == '__main__':
     app.run(debug=True)
