@@ -31,13 +31,15 @@ def create_ics(trips):
     calendar = Calendar()
     for trip in trips:
         for section in trip.get('tripPlan', {}).get('itinerary', {}).get('sections', []):
-            print(section)
-            # e = Event()
-            # e.name = event.get('title', 'No Title')
-            # e.begin = datetime.fromtimestamp(event.get('startDate') / 1000).isoformat()
-            # e.end = datetime.fromtimestamp(event.get('endDate') / 1000).isoformat()
-            # e.description = event.get('description', '')
-            # calendar.events.add(e)
+            if section.get('mode') == 'dayPlan':
+                heading = section.get('heading')
+                date = section.get('date')
+                if heading and date:
+                    e = Event()
+                    e.name = heading
+                    e.begin = datetime.strptime(date, "%Y-%m-%d")
+                    e.make_all_day()
+                    calendar.events.add(e)
     return calendar
 
 @app.route('/trips.json')
