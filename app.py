@@ -18,11 +18,8 @@ def fetch_trip_ids():
     }
     response = requests.get(url, headers=headers)
     response.raise_for_status()
-    try:
-       return [trip['key'] for trip in response.json().get('tripPlans', []) if 'key' in trip]
-    except KeyError as e:
-        print(f"KeyError: The key {e} does not exist where expected in {response.json()}.")
-        return []
+    tripPlans = response.json().get('tripPlans', [])
+    return list(filter(None, [trip.get('key', False) for trip in tripPlans]))
 
 def fetch_trip(trip_id):
     url = f"{app.config['WANDERLOG_API_URL']}/{trip_id}?clientSchemaVersion=2&registerView=true"
@@ -52,7 +49,7 @@ def trips_json():
 def trips_ics():
     trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
     calendar = create_ics(trips)
-    return Response(str(calendar), mimetype='text/calendar')
+    return Response(str(calendar), mimetype=f"{'text/plain' if app.debug else 'text/calendar'}")
 
 if __name__ == '__main__':
     app.run(debug=True)
