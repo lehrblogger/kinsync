@@ -45,6 +45,11 @@ def trips_json():
     trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
     return jsonify(trips)
 
+@app.route('/sections.json')
+def sections_json():
+    trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
+    return jsonify([section for trip in trips for section in trip.get('tripPlan', {}).get('itinerary', {}).get('sections', [])])
+
 @app.route('/trips.ics')
 def trips_ics():
     trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
