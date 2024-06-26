@@ -34,6 +34,43 @@ def create_ics(trips):
     tf = TimezoneFinder()
     calendar = Calendar()
     for trip in trips:
+        # First, collect information about lodging for each day that will be used later for the all day events
+        lodging_locs_by_date = {}
+        lodging_info_by_date = {}
+        lodging_urls_by_date = {}
+        for section in trip.get('tripPlan', {}).get('itinerary', {}).get('sections', []):
+            if section.get('mode') == 'placeList' and section.get('type') == 'hotels':
+                for block in section.get('blocks'):
+                    # Get the name and address
+                    name = block.get('place').get('name')
+                    formatted_address = block.get('place').get('formatted_address')
+                    if not formatted_address.startswith(name):
+                        formatted_address = f'{name}, {formatted_address}'
+                    # Get the info
+                    info = ""
+                    confirmation = block.get('hotel').get('confirmationNumber')
+                    other_info = ""
+                    text_ops = block.get('text', {}).get('ops', [])
+                    if text_ops:
+                        for text_op in text_ops:
+                            link = text_op.get('attributes', {}).get('link', '')
+                            if link:
+                                other_info += link
+                            else:
+                                other_info += text_op.get('insert', '')
+                    if confirmation:
+                        info += f'Confirmation number: {confirmation}'
+                    if other_info:
+                        info += f'\n\n{other_info}'
+                    # Associate the above with each date
+                    check_in_date  = datetime.strptime(block.get('hotel').get('checkIn' ), "%Y-%m-%d")
+                    check_out_date = datetime.strptime(block.get('hotel').get('checkOut'), "%Y-%m-%d")
+                    current_date = check_in_date
+                    while current_date < check_out_date:
+                        lodging_locs_by_date[current_date.strftime("%Y-%m-%d")] = formatted_address
+                        lodging_info_by_date[current_date.strftime("%Y-%m-%d")] = info
+                        lodging_urls_by_date[current_date.strftime("%Y-%m-%d")] = block.get('place').get('website', block.get('place').get('url'))
+                        current_date += timedelta(days=1)
         for section in trip.get('tripPlan', {}).get('itinerary', {}).get('sections', []):
             if section.get('mode') == 'dayPlan':
                 heading = section.get('heading')
@@ -43,7 +80,9 @@ def create_ics(trips):
                     e.name = heading
                     e.begin = datetime.strptime(date, '%Y-%m-%d')
                     e.make_all_day()
-                    e.url = f"https://wanderlog.com/plan/{trip.get('tripPlan', {}).get('key')}/"
+                    e.location = lodging_locs_by_date.get(date)
+                    e.description = lodging_info_by_date.get(date)
+                    e.url = lodging_urls_by_date.get(date, f"https://wanderlog.com/plan/{trip.get('tripPlan', {}).get('key')}/")
                     calendar.events.add(e)
                 for block in section.get('blocks', []):
                     if block.get('type') != 'place':
