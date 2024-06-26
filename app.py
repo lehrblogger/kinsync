@@ -49,11 +49,11 @@ def create_ics(trips):
                     if block.get('type') != 'place':
                         continue
                     placeName = block.get('place', {}).get('name')
-                    startTime = block.get('startTime')
-                    endTime = block.get('endTime')
                     lat = block.get('place', {}).get('geometry', {}).get('location', {}).get('lat')
                     lng = block.get('place', {}).get('geometry', {}).get('location', {}).get('lng')
-                    if not placeName or not startTime or not lat or not lng:
+                    startTime = block.get('startTime')
+                    endTime = block.get('endTime')
+                    if not placeName or not lat or not lng or not startTime:
                         continue
                     e = Event()
                     text_ops = block.get('text', {}).get('ops', [])
@@ -70,6 +70,7 @@ def create_ics(trips):
                         e.name = name_description[0].strip('.').strip()
                         if len(name_description) > 1:
                              e.description = name_description[1].strip()
+                    e.url = block.get('place').get('website', block.get('place').get('url'))
                     formatted_address = block.get('place').get('formatted_address')
                     if formatted_address:
                         e.location = f'{placeName}, {formatted_address}'
