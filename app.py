@@ -1,8 +1,11 @@
 from flask import Flask, jsonify, Response
 from config import Config
 from ics import Calendar, Event
+from ics.grammar.parse import ContentLine
 from datetime import datetime, timedelta
 import requests
+from zoneinfo import ZoneInfo
+from timezonefinder import TimezoneFinder
 
 app = Flask(__name__)
 app.config.from_object(Config)
@@ -28,6 +31,7 @@ def fetch_trip(trip_id):
     return response.json()
 
 def create_ics(trips):
+    tf = TimezoneFinder()
     calendar = Calendar()
     for trip in trips:
         for section in trip.get('tripPlan', {}).get('itinerary', {}).get('sections', []):
@@ -42,21 +46,32 @@ def create_ics(trips):
                     e.url = f"https://wanderlog.com/plan/{trip.get('tripPlan', {}).get('key')}/"
                     calendar.events.add(e)
                 for block in section.get('blocks', []):
-                     placeName = block.get('place', {}).get('name')
-                     startTime = block.get('startTime')
-                     texts = block.get('text', {}).get('ops', [])
-                     title = texts[0].get('insert', '').split('\n')[0].strip('.') if texts else placeName
-                     if block.get('type') == 'place' and placeName and startTime:
-                        e = Event()
-                        e.name = title
+                    if block.get('type') != 'place':
+                        continue
+                    placeName = block.get('place', {}).get('name')
+                    startTime = block.get('startTime')
+                    endTime = block.get('endTime')
+                    lat = block.get('place', {}).get('geometry', {}).get('location', {}).get('lat')
+                    lng = block.get('place', {}).get('geometry', {}).get('location', {}).get('lng')
+                    if not placeName or not startTime or not lat or not lng:
+                        continue
+                    e = Event()
+                    texts = block.get('text', {}).get('ops', [])
+                    title = texts[0].get('insert', '').split('\n')[0].strip('.') if texts else placeName
+                    e.name = title
+                    formatted_address = block.get('place').get('formatted_address')
+                    if formatted_address:
+                        e.location = f'{placeName}, {formatted_address}'
+                    else:
                         e.location = placeName
-                        e.begin = datetime.strptime(f'{date} {startTime}', '%Y-%m-%d %H:%M')
-                        endTime = block.get('endTime')
-                        if endTime:
-                            e.end =  datetime.strptime(f'{date} {endTime}', '%Y-%m-%d %H:%M')
-                        else:
-                            e.end = e.begin + timedelta(minutes=1)
-                        calendar.events.add(e)
+                    tz = ZoneInfo(tf.timezone_at(lng=lng, lat=lat))
+                    begin_datetime = datetime.strptime(f'{date} {startTime}', '%Y-%m-%d %H:%M').replace(tzinfo=tz)
+                    end_datetime = begin_datetime + timedelta(minutes=1)
+                    if endTime:
+                        end_datetime = datetime.strptime(f'{date} {endTime}', '%Y-%m-%d %H:%M').replace(tzinfo=tz)
+                    e.extra.append(ContentLine(name="DTSTART", params={"TZID": [tz.key]}, value=begin_datetime.strftime('%Y%m%dT%H%M%S')))
+                    e.extra.append(ContentLine(name="DTEND"  , params={"TZID": [tz.key]}, value=end_datetime.strftime('%Y%m%dT%H%M%S')))
+                    calendar.events.add(e)
     return calendar
 
 @app.route('/trips.json')
