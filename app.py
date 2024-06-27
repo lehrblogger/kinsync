@@ -1,4 +1,5 @@
-from flask import Flask, jsonify, Response
+from flask import Flask, Response, abort, jsonify, request
+from functools import wraps
 from config import Config
 from ics import Calendar, Event
 from ics.grammar.parse import ContentLine
@@ -9,10 +10,6 @@ from timezonefinder import TimezoneFinder
 
 app = Flask(__name__)
 app.config.from_object(Config)
-
-@app.route('/')
-def hello_world():
-    return 'Hello, World!'
 
 def fetch_trip_ids():
     url = f"{app.config['WANDERLOG_API_URL']}/myProfile"
@@ -125,17 +122,33 @@ def create_ics(trips):
                     calendar.events.add(e)
     return calendar
 
+def require_secret_key(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if request.args.get('secret_key') != app.config['SECRET_KEY']:
+            abort(401)  # Unauthorized
+        return f(*args, **kwargs)
+    return decorated_function
+
+@app.route('/')
+@require_secret_key
+def hello_world():
+    return 'Hello, World!'
+
 @app.route('/trips.json')
+@require_secret_key
 def trips_json():
     trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
     return jsonify(trips)
 
 @app.route('/sections.json')
+@require_secret_key
 def sections_json():
     trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
     return jsonify([section for trip in trips for section in trip.get('tripPlan', {}).get('itinerary', {}).get('sections', [])])
 
 @app.route('/blocks.json')
+@require_secret_key
 def blocks_json():
     trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
     sections = [section for trip in trips for section in trip.get('tripPlan', {}).get('itinerary', {}).get('sections', [])]
@@ -146,6 +159,7 @@ def blocks_json():
     ]
 
 @app.route('/trips.ics')
+@require_secret_key
 def trips_ics():
     trips = [fetch_trip(trip_id) for trip_id in fetch_trip_ids()]
     calendar = create_ics(trips)
