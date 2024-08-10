@@ -103,7 +103,9 @@ def create_ics(trips):
                             else:
                                 text += text_op.get('insert', '')
                         name_description = text.split('\n', 1)
-                        e.name = name_description[0].strip('.').strip()
+                        name = name_description[0].strip('.').strip()
+                        if len(name) > 0:
+                            e.name = name
                         if len(name_description) > 1:
                              e.description = name_description[1].strip()
                     e.url = block.get('place').get('website', block.get('place').get('url'))
