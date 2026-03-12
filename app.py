@@ -1,3 +1,4 @@
+import hmac
 import os
 import re
 import requests
@@ -112,18 +113,21 @@ def prepare_events(itinerary, confirmation_number):
 
         else:
             time_str = item.get("time", "")
+            allday_date = date.fromisoformat(date_str).strftime("%Y%m%d")
             if not time_str:
-                continue
-
-            try:
-                dt = parse_api_time(date_str, time_str)
-                dtstart = dt.strftime("%Y%m%dT%H%M%SZ")
-                dtend = (dt + timedelta(hours=1)).strftime("%Y%m%dT%H%M%SZ")
-                allday = False
-            except (ValueError, AttributeError):
-                dtstart = date.fromisoformat(date_str).strftime("%Y%m%d")
-                dtend = dtstart
+                dtstart = allday_date
+                dtend = allday_date
                 allday = True
+            else:
+                try:
+                    dt = parse_api_time(date_str, time_str)
+                    dtstart = dt.strftime("%Y%m%dT%H%M%SZ")
+                    dtend = (dt + timedelta(hours=1)).strftime("%Y%m%dT%H%M%SZ")
+                    allday = False
+                except (ValueError, AttributeError):
+                    dtstart = allday_date
+                    dtend = allday_date
+                    allday = True
 
             vendor = item.get("vendorNameOnItinerary", "")
             subtype = item.get("requestSubtype", "")
@@ -177,7 +181,7 @@ def get_itinerary(session: requests.Session, booking_id: str) -> dict:
 
 @app.route("/run")
 def run():
-    if request.headers.get("Authorization") != f"Bearer {CRON_SECRET}":
+    if not hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {CRON_SECRET}"):
         abort(401)
 
     session = requests.Session()
