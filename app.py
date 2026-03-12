@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-FS_USER_TOKEN = os.environ["FS_USER_TOKEN"]
+FS_COOKIES = os.environ["FS_COOKIES"]
 CRON_SECRET = os.environ["CRON_SECRET"]
 
 BASE_URL = "https://www.fourseasons.com"
@@ -158,7 +158,7 @@ def prepare_events(itinerary, confirmation_number):
 
 
 def login(session: requests.Session) -> None:
-    session.cookies.set("UserToken", FS_USER_TOKEN, domain="www.fourseasons.com")
+    session.headers.update({"Cookie": FS_COOKIES})
 
 
 def get_confirmation_numbers(session: requests.Session) -> list[str]:
@@ -185,7 +185,16 @@ def run():
         abort(401)
 
     session = requests.Session()
-    session.headers.update({"User-Agent": "Mozilla/5.0"})
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Sec-Ch-Ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"macOS"',
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+    })
 
     login(session)
     confirmation_numbers = get_confirmation_numbers(session)
