@@ -1,6 +1,6 @@
 services:
   - type: web
-    name: four-seasons-calendar
+    name: kinsync
     runtime: python
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn app:app --bind 0.0.0.0:$PORT
@@ -21,16 +21,16 @@ services:
         value: main
 
   - type: cron
-    name: four-seasons-calendar-cron
+    name: kinsync-cron
     runtime: python
     schedule: "0 6 * * *"  # daily at 6am UTC
     buildCommand: pip install -r requirements.txt
     startCommand: >
-      curl -sf "https://four-seasons-calendar.onrender.com/run"
+      curl -sf "https://kinsync.onrender.com/run"
         -H "Authorization: Bearer $CRON_SECRET"
     envVars:
       - key: CRON_SECRET
         fromService:
-          name: four-seasons-calendar
+          name: kinsync
           type: web
           envVarKey: CRON_SECRET

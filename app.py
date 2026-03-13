@@ -2,8 +2,10 @@ import base64
 import hmac
 import os
 import re
+import shutil
 import requests
 from datetime import date, datetime, timedelta, timezone
+from pathlib import Path
 from flask import Flask, abort, render_template, request
 from dotenv import load_dotenv
 
@@ -11,11 +13,15 @@ load_dotenv()
 
 FS_COOKIES = os.environ["FS_COOKIES"]
 CRON_SECRET = os.environ["CRON_SECRET"]
-GITEA_URL = os.environ["GITEA_URL"]        # e.g. https://gitea.example.com
-GITEA_TOKEN = os.environ["GITEA_TOKEN"]    # personal access token
-GITEA_OWNER = os.environ["GITEA_OWNER"]    # your Gitea username or org
-GITEA_REPO = os.environ["GITEA_REPO"]      # repository name
+GITEA_URL = os.environ.get("GITEA_URL", "")
+GITEA_TOKEN = os.environ.get("GITEA_TOKEN", "")
+GITEA_OWNER = os.environ.get("GITEA_OWNER", "")
+GITEA_REPO = os.environ.get("GITEA_REPO", "")
 GITEA_BRANCH = os.environ.get("GITEA_BRANCH", "main")
+
+RADICALE_COLLECTIONS = "/data/collections/collection-root"
+RADICALE_USER = os.environ.get("RADICALE_USER", "")
+RADICALE_CALENDAR = os.environ.get("RADICALE_CALENDAR", "four-seasons")
 
 BASE_URL = "https://www.fourseasons.com"
 UPCOMING_TRIPS_URL = f"{BASE_URL}/profile/api/upcoming-trips/"
@@ -206,7 +212,27 @@ def delete_gitea_file(file_path: str, sha: str) -> None:
     resp.raise_for_status()
 
 
+def write_to_radicale(confirmation_number: str, events: list) -> None:
+    if not RADICALE_USER:
+        return
+    calendar_dir = Path(f"{RADICALE_COLLECTIONS}/{RADICALE_USER}/{RADICALE_CALENDAR}")
+    calendar_dir.mkdir(parents=True, exist_ok=True)
+    new_filenames = set()
+    for event in events:
+        dest_filename = f"{confirmation_number}-{event['filename']}"
+        new_filenames.add(dest_filename)
+        (calendar_dir / dest_filename).write_text(render_template("event.ics", event=event))
+    for f in calendar_dir.glob(f"{confirmation_number}-*.ics"):
+        if f.name not in new_filenames:
+            f.unlink()
+    cache_dir = calendar_dir / ".Radicale.cache"
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)
+
+
 def sync_trip_to_gitea(confirmation_number: str, events: list) -> None:
+    if not all([GITEA_URL, GITEA_TOKEN, GITEA_OWNER, GITEA_REPO]):
+        return
     existing = list_gitea_dir(confirmation_number)
     new_filenames = {event["filename"] for event in events}
     for event in events:
@@ -264,5 +290,6 @@ def run():
         itinerary = get_itinerary(session, booking_id)
         events = prepare_events(itinerary, confirmation_number)
         sync_trip_to_gitea(confirmation_number, events)
+        write_to_radicale(confirmation_number, events)
 
     return f"Done. Processed {len(confirmation_numbers)} booking(s)."
