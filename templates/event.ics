@@ -1,7 +1,6 @@
 BEGIN:VCALENDAR
 VERSION:2.0
 PRODID:-//four-seasons-calendar//EN
-{% for event in events %}
 BEGIN:VEVENT
 UID:{{ event.uid }}
 DTSTAMP:{{ event.dtstamp }}
@@ -20,5 +19,4 @@ LOCATION:{{ event.location | ical_escape }}
 DESCRIPTION:{{ event.description | ical_escape }}
 {% endif %}
 END:VEVENT
-{% endfor %}
 END:VCALENDAR

@@ -67,6 +67,7 @@ def prepare_events(itinerary, confirmation_number):
     # Multi-day stay event (all-day, spans check-in through check-out)
     events.append({
         "uid": f"{confirmation_number}-stay@fourseasons-calendar",
+        "filename": "stay.ics",
         "dtstamp": now_stamp,
         "summary": property_name,
         "allday": True,
@@ -80,6 +81,7 @@ def prepare_events(itinerary, confirmation_number):
     co_dt = datetime.combine(check_out_date, datetime.strptime("12:00", "%H:%M").time())
     events.append({
         "uid": f"{confirmation_number}-checkout@fourseasons-calendar",
+        "filename": "checkout.ics",
         "dtstamp": now_stamp,
         "summary": f"Check Out – {property_name}",
         "allday": False,
@@ -108,6 +110,7 @@ def prepare_events(itinerary, confirmation_number):
 
             events.append({
                 "uid": f"{confirmation_number}-checkin@fourseasons-calendar",
+                "filename": "checkin.ics",
                 "dtstamp": now_stamp,
                 "summary": f"Check In – {property_name}",
                 "allday": allday,
@@ -151,6 +154,7 @@ def prepare_events(itinerary, confirmation_number):
 
             events.append({
                 "uid": f"{confirmation_number}-{i}@fourseasons-calendar",
+                "filename": f"{i}.ics",
                 "dtstamp": now_stamp,
                 "summary": event_summary,
                 "allday": allday,
@@ -163,23 +167,54 @@ def prepare_events(itinerary, confirmation_number):
     return events
 
 
-def commit_ics(confirmation_number: str, ics_content: str) -> None:
-    file_path = f"{confirmation_number}.ics"
+def list_gitea_dir(confirmation_number: str) -> dict[str, str]:
+    """Returns {filename: sha} for all files in the trip's directory."""
+    url = f"{GITEA_URL}/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/contents/{confirmation_number}"
+    headers = {"Authorization": f"token {GITEA_TOKEN}"}
+    resp = requests.get(url, headers=headers, params={"ref": GITEA_BRANCH})
+    if resp.status_code == 404:
+        return {}
+    resp.raise_for_status()
+    return {item["name"]: item["sha"] for item in resp.json() if item["type"] == "file"}
+
+
+def commit_event(confirmation_number: str, filename: str, ics_content: str, existing_sha: str | None = None) -> None:
+    file_path = f"{confirmation_number}/{filename}"
     url = f"{GITEA_URL}/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/contents/{file_path}"
     headers = {"Authorization": f"token {GITEA_TOKEN}"}
     payload = {
         "branch": GITEA_BRANCH,
         "content": base64.b64encode(ics_content.encode()).decode(),
-        "message": f"Update itinerary for {confirmation_number}",
+        "message": f"Update {file_path}",
     }
-    # Gitea requires the file's current SHA to update an existing file
-    get_resp = requests.get(url, headers=headers, params={"ref": GITEA_BRANCH})
-    if get_resp.status_code == 200:
-        payload["sha"] = get_resp.json()["sha"]
+    if existing_sha:
+        payload["sha"] = existing_sha
         resp = requests.put(url, headers=headers, json=payload)
     else:
         resp = requests.post(url, headers=headers, json=payload)
     resp.raise_for_status()
+
+
+def delete_gitea_file(file_path: str, sha: str) -> None:
+    url = f"{GITEA_URL}/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/contents/{file_path}"
+    headers = {"Authorization": f"token {GITEA_TOKEN}"}
+    resp = requests.delete(url, headers=headers, json={
+        "branch": GITEA_BRANCH,
+        "message": f"Remove stale event {file_path}",
+        "sha": sha,
+    })
+    resp.raise_for_status()
+
+
+def sync_trip_to_gitea(confirmation_number: str, events: list) -> None:
+    existing = list_gitea_dir(confirmation_number)
+    new_filenames = {event["filename"] for event in events}
+    for event in events:
+        ics_content = render_template("event.ics", event=event)
+        commit_event(confirmation_number, event["filename"], ics_content, existing.get(event["filename"]))
+    for filename, sha in existing.items():
+        if filename not in new_filenames:
+            delete_gitea_file(f"{confirmation_number}/{filename}", sha)
 
 
 def login(session: requests.Session) -> None:
@@ -228,7 +263,6 @@ def run():
         booking_id = get_booking_id(session, confirmation_number)
         itinerary = get_itinerary(session, booking_id)
         events = prepare_events(itinerary, confirmation_number)
-        ics_content = render_template("itinerary.ics", events=events)
-        commit_ics(confirmation_number, ics_content)
+        sync_trip_to_gitea(confirmation_number, events)
 
     return f"Done. Processed {len(confirmation_numbers)} booking(s)."
