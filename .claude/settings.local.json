@@ -5,7 +5,12 @@
       "Bash(pip3 install:*)",
       "Bash(python3 -m venv .venv)",
       "Bash(.venv/bin/pip install:*)",
-      "WebFetch(domain:www.fourseasons.com)"
+      "WebFetch(domain:www.fourseasons.com)",
+      "WebFetch(domain:radicale.org)",
+      "WebSearch",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:cheatsheets.stephane.plus)",
+      "WebFetch(domain:forum.cloudron.io)"
     ]
   }
 }

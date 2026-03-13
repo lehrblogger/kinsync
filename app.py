@@ -1,3 +1,4 @@
+import base64
 import hmac
 import os
 import re
@@ -10,6 +11,11 @@ load_dotenv()
 
 FS_COOKIES = os.environ["FS_COOKIES"]
 CRON_SECRET = os.environ["CRON_SECRET"]
+GITEA_URL = os.environ["GITEA_URL"]        # e.g. https://gitea.example.com
+GITEA_TOKEN = os.environ["GITEA_TOKEN"]    # personal access token
+GITEA_OWNER = os.environ["GITEA_OWNER"]    # your Gitea username or org
+GITEA_REPO = os.environ["GITEA_REPO"]      # repository name
+GITEA_BRANCH = os.environ.get("GITEA_BRANCH", "main")
 
 BASE_URL = "https://www.fourseasons.com"
 UPCOMING_TRIPS_URL = f"{BASE_URL}/profile/api/upcoming-trips/"
@@ -157,6 +163,25 @@ def prepare_events(itinerary, confirmation_number):
     return events
 
 
+def commit_ics(confirmation_number: str, ics_content: str) -> None:
+    file_path = f"{confirmation_number}.ics"
+    url = f"{GITEA_URL}/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/contents/{file_path}"
+    headers = {"Authorization": f"token {GITEA_TOKEN}"}
+    payload = {
+        "branch": GITEA_BRANCH,
+        "content": base64.b64encode(ics_content.encode()).decode(),
+        "message": f"Update itinerary for {confirmation_number}",
+    }
+    # Gitea requires the file's current SHA to update an existing file
+    get_resp = requests.get(url, headers=headers, params={"ref": GITEA_BRANCH})
+    if get_resp.status_code == 200:
+        payload["sha"] = get_resp.json()["sha"]
+        resp = requests.put(url, headers=headers, json=payload)
+    else:
+        resp = requests.post(url, headers=headers, json=payload)
+    resp.raise_for_status()
+
+
 def login(session: requests.Session) -> None:
     session.headers.update({"Cookie": FS_COOKIES})
 
@@ -204,6 +229,6 @@ def run():
         itinerary = get_itinerary(session, booking_id)
         events = prepare_events(itinerary, confirmation_number)
         ics_content = render_template("itinerary.ics", events=events)
-        # TODO: commit ics_content to repo as {confirmation_number}.ics
+        commit_ics(confirmation_number, ics_content)
 
     return f"Done. Processed {len(confirmation_numbers)} booking(s)."

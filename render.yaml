@@ -9,6 +9,16 @@ services:
         sync: false
       - key: CRON_SECRET
         generateValue: true
+      - key: GITEA_URL
+        sync: false
+      - key: GITEA_TOKEN
+        sync: false
+      - key: GITEA_OWNER
+        sync: false
+      - key: GITEA_REPO
+        sync: false
+      - key: GITEA_BRANCH
+        value: main
 
   - type: cron
     name: four-seasons-calendar-cron
