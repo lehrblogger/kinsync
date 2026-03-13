@@ -18,4 +18,7 @@ if [ -n "$RADICALE_USER" ] && [ -n "$RADICALE_CALENDAR" ]; then
     fi
 fi
 
+# Make CRON_SECRET available to cron jobs
+echo "CRON_SECRET=$CRON_SECRET" >> /etc/environment
+
 exec /usr/bin/supervisord -c /etc/supervisor/conf.d/supervisord.conf

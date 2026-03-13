@@ -4,7 +4,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         nginx \
         supervisor \
         apache2-utils \
+        cron \
     && rm -rf /var/lib/apt/lists/*
+
+COPY docker/crontab /etc/cron.d/kinsync
+RUN chmod 0644 /etc/cron.d/kinsync
 
 COPY requirements.txt /tmp/requirements.txt
 RUN pip install --no-cache-dir -r /tmp/requirements.txt
