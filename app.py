@@ -198,6 +198,24 @@ def strip_html(text):
     return text.strip()
 
 
+def parse_duration_hours(duration_str):
+    """Parse FS duration strings like '1 Hour', '2.5 hours', '45 minutes', 'Approx. 2.5 Hours'.
+    Returns float hours, or None if unparseable (e.g. '2 days')."""
+    if not duration_str:
+        return None
+    s = re.sub(r"approx\.?\s*", "", duration_str.lower()).strip()
+    if re.search(r"\d+\s*days?", s):
+        return None
+    hours = 0.0
+    h = re.search(r"(\d+(?:\.\d+)?)\s*hours?", s)
+    if h:
+        hours += float(h.group(1))
+    m = re.search(r"(\d+)\s*min", s)
+    if m:
+        hours += int(m.group(1)) / 60
+    return hours if hours > 0 else None
+
+
 def parse_api_time(date_str, time_str):
     """Parse 'YYYY-MM-DD' + 'HH:MM:SS.sssZ' into a naive local datetime.
     The Z suffix in FS API responses is misleading — times are local property time."""
@@ -279,6 +297,7 @@ def prepare_events(itinerary, confirmation_number):
         else:
             time_str = item.get("time", "")
             allday_date = date.fromisoformat(date_str).strftime("%Y%m%d")
+            duration_hours = parse_duration_hours(item.get("duration", "")) or 1
             if not time_str:
                 dtstart = allday_date
                 dtend = allday_date
@@ -287,7 +306,7 @@ def prepare_events(itinerary, confirmation_number):
             else:
                 try:
                     dt = parse_api_time(date_str, time_str)
-                    dtstart, dtend, allday = make_timed(dt)
+                    dtstart, dtend, allday = make_timed(dt, duration_hours)
                     event_tzid = tzid
                 except (ValueError, AttributeError):
                     dtstart = allday_date
@@ -299,7 +318,24 @@ def prepare_events(itinerary, confirmation_number):
             subtype = item.get("requestSubtype", "")
             event_summary = f"{vendor} ({subtype})" if vendor and subtype else vendor or subtype
 
+            meta = []
+            if item.get("confirmationNumber"):
+                meta.append(f"Confirmation: {item['confirmationNumber']}")
+            if item.get("totalGuests"):
+                meta.append(f"Guests: {item['totalGuests']}")
+            elif item.get("numberOfGuests"):
+                meta.append(f"Guests: {item['numberOfGuests']}")
+            if item.get("totalCost") is not None:
+                currency = item.get("currencyCode", "USD")
+                meta.append(f"Cost: {currency} {item['totalCost']:,.2f}")
+            if item.get("dropoffLocation"):
+                meta.append(f"Drop-off: {item['dropoffLocation']}")
+            if item.get("vehicleSelected"):
+                meta.append(f"Vehicle: {item['vehicleSelected']}")
+
             desc_parts = []
+            if meta:
+                desc_parts.append("\n".join(meta))
             if item.get("description"):
                 desc_parts.append(item["description"])
             notes = strip_html(item.get("guestVisibleNotes", ""))
