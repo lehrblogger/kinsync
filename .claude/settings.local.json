@@ -10,7 +10,10 @@
       "WebSearch",
       "WebFetch(domain:github.com)",
       "WebFetch(domain:cheatsheets.stephane.plus)",
-      "WebFetch(domain:forum.cloudron.io)"
+      "WebFetch(domain:forum.cloudron.io)",
+      "Bash(fly status:*)",
+      "Bash(fly secrets:*)",
+      "Bash(fly ssh:*)"
     ]
   }
 }
