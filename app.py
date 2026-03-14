@@ -223,6 +223,14 @@ def parse_api_time(date_str, time_str):
     return datetime.strptime(f"{date_str}T{t}", "%Y-%m-%dT%H:%M:%S")
 
 
+def _item_location(item, property_name):
+    pickup = item.get("pickupLocation", "")
+    dropoff = item.get("dropoffLocation", "")
+    if pickup and dropoff:
+        return f"{pickup} → {dropoff}"
+    return item.get("departureLocation") or pickup or dropoff or property_name
+
+
 def prepare_events(itinerary, confirmation_number):
     events = []
     summary = itinerary["bookingSummary"]
@@ -297,7 +305,8 @@ def prepare_events(itinerary, confirmation_number):
         else:
             time_str = item.get("time", "")
             allday_date = date.fromisoformat(date_str).strftime("%Y%m%d")
-            duration_hours = parse_duration_hours(item.get("duration", "")) or 1
+            default_duration = 2 if item.get("requestType") == "Dining" else 1
+            duration_hours = parse_duration_hours(item.get("duration", "")) or default_duration
             if not time_str:
                 dtstart = allday_date
                 dtend = allday_date
@@ -354,7 +363,7 @@ def prepare_events(itinerary, confirmation_number):
                 "tzid": event_tzid,
                 "dtstart": dtstart,
                 "dtend": dtend,
-                "location": item.get("departureLocation") or item.get("pickupLocation") or "",
+                "location": _item_location(item, property_name),
                 "description": "\n\n".join(desc_parts),
             })
 
