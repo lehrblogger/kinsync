@@ -388,10 +388,17 @@ def write_to_radicale(confirmation_number: str, events: list) -> None:
     calendar_dir = Path(f"{RADICALE_COLLECTIONS}/{RADICALE_USER}/{RADICALE_CALENDAR}")
     calendar_dir.mkdir(parents=True, exist_ok=True)
     new_filenames = set()
+    def without_dtstamp(content):
+        return "\n".join(l for l in content.splitlines() if not l.startswith("DTSTAMP:"))
+
     for event in events:
         dest_filename = f"{confirmation_number}-{event['filename']}"
         new_filenames.add(dest_filename)
-        (calendar_dir / dest_filename).write_text(render_template("event.ics", event=event))
+        dest_path = calendar_dir / dest_filename
+        new_content = render_template("event.ics", event=event)
+        if dest_path.exists() and without_dtstamp(dest_path.read_text()) == without_dtstamp(new_content):
+            continue
+        dest_path.write_text(new_content)
     for f in calendar_dir.glob(f"{confirmation_number}-*.ics"):
         if f.name not in new_filenames:
             f.unlink()
