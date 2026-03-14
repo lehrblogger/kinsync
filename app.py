@@ -377,7 +377,7 @@ def git_commit_and_push(message: str) -> None:
         if diff.returncode == 0:
             return  # nothing to commit
         subprocess.run(["git", "-C", repo, "commit", "-m", message], check=True, capture_output=True)
-        subprocess.run(["git", "-C", repo, "push", "origin", "HEAD:main"], check=True, capture_output=True)
+        subprocess.run(["git", "-C", repo, "push", "--force", "origin", "HEAD:main"], check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         app.logger.error("Git push failed: %s", e.stderr.decode(errors="replace"))
 
