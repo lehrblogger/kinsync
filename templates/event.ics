@@ -8,6 +8,9 @@ SUMMARY:{{ event.summary | ical_escape }}
 {% if event.allday %}
 DTSTART;VALUE=DATE:{{ event.dtstart }}
 DTEND;VALUE=DATE:{{ event.dtend }}
+{% elif event.tzid %}
+DTSTART;TZID={{ event.tzid }}:{{ event.dtstart }}
+DTEND;TZID={{ event.tzid }}:{{ event.dtend }}
 {% else %}
 DTSTART:{{ event.dtstart }}
 DTEND:{{ event.dtend }}

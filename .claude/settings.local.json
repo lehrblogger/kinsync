@@ -13,7 +13,8 @@
       "WebFetch(domain:forum.cloudron.io)",
       "Bash(fly status:*)",
       "Bash(fly secrets:*)",
-      "Bash(fly ssh:*)"
+      "Bash(fly ssh:*)",
+      "Bash(ls -la *.py *.json)"
     ]
   }
 }

@@ -24,6 +24,147 @@ RADICALE_COLLECTIONS = "/data/collections/collection-root"
 RADICALE_USER = os.environ.get("RADICALE_USER", "")
 RADICALE_CALENDAR = os.environ.get("RADICALE_CALENDAR", "four-seasons")
 
+# Maps Four Seasons property slug (propertyAnalytics.id) to IANA timezone.
+# Times in the FS API use a misleading Z suffix but are actually local property times.
+PROPERTY_TIMEZONES = {
+    # Hawaii
+    "hualalai": "Pacific/Honolulu",
+    "lanai": "Pacific/Honolulu",
+    "maui": "Pacific/Honolulu",
+    "oahu": "Pacific/Honolulu",
+    # US West Coast
+    "beverly-hills": "America/Los_Angeles",
+    "beverly-wilshire": "America/Los_Angeles",
+    "los-angeles": "America/Los_Angeles",
+    "westlake-village": "America/Los_Angeles",
+    "san-francisco": "America/Los_Angeles",
+    "silicon-valley": "America/Los_Angeles",
+    "palo-alto": "America/Los_Angeles",
+    "seattle": "America/Los_Angeles",
+    "san-diego": "America/Los_Angeles",
+    "santa-barbara": "America/Los_Angeles",
+    # US Mountain
+    "denver": "America/Denver",
+    "jackson-hole": "America/Denver",
+    "vail": "America/Denver",
+    "santa-fe": "America/Denver",
+    "scottsdale": "America/Phoenix",
+    # US Central
+    "chicago": "America/Chicago",
+    "houston": "America/Chicago",
+    "austin": "America/Chicago",
+    "st-louis": "America/Chicago",
+    "new-orleans": "America/Chicago",
+    "nashville": "America/Chicago",
+    # US East Coast
+    "new-york": "America/New_York",
+    "boston": "America/New_York",
+    "baltimore": "America/New_York",
+    "philadelphia": "America/New_York",
+    "atlanta": "America/New_York",
+    "miami": "America/New_York",
+    "fort-lauderdale": "America/New_York",
+    "orlando": "America/New_York",
+    "palm-beach": "America/New_York",
+    "washington-dc": "America/New_York",
+    "naples": "America/New_York",
+    # Canada
+    "toronto": "America/Toronto",
+    "montreal": "America/Toronto",
+    "vancouver": "America/Vancouver",
+    "whistler": "America/Vancouver",
+    # Mexico & Caribbean
+    "los-cabos": "America/Mazatlan",
+    "costa-palmas": "America/Mazatlan",
+    "mexico-city": "America/Mexico_City",
+    "punta-mita": "America/Mexico_City",
+    "tamarindo": "America/Costa_Rica",
+    "costa-rica": "America/Costa_Rica",
+    "bahamas": "America/Nassau",
+    "anguilla": "America/Anguilla",
+    "nevis": "America/St_Kitts",
+    "puerto-rico": "America/Puerto_Rico",
+    # South America
+    "bogota": "America/Bogota",
+    "cartagena": "America/Bogota",
+    "buenos-aires": "America/Argentina/Buenos_Aires",
+    # Europe
+    "paris": "Europe/Paris",
+    "megeve": "Europe/Paris",
+    "london": "Europe/London",
+    "hampshire": "Europe/London",
+    "milan": "Europe/Rome",
+    "florence": "Europe/Rome",
+    "taormina": "Europe/Rome",
+    "madrid": "Europe/Madrid",
+    "mallorca": "Europe/Madrid",
+    "lisbon": "Europe/Lisbon",
+    "geneva": "Europe/Zurich",
+    "gstaad": "Europe/Zurich",
+    "budapest": "Europe/Budapest",
+    "prague": "Europe/Prague",
+    "athens": "Europe/Athens",
+    "istanbul": "Europe/Istanbul",
+    "baku": "Asia/Baku",
+    "french-riviera": "Europe/Paris",
+    # Middle East
+    "dubai": "Asia/Dubai",
+    "abu-dhabi": "Asia/Dubai",
+    "amaala": "Asia/Riyadh",
+    "red-sea": "Asia/Riyadh",
+    "riyadh": "Asia/Riyadh",
+    "doha": "Asia/Qatar",
+    "kuwait": "Asia/Kuwait",
+    "bahrain": "Asia/Bahrain",
+    "beirut": "Asia/Beirut",
+    "amman": "Asia/Amman",
+    "cairo": "Africa/Cairo",
+    "sharm-el-sheikh": "Africa/Cairo",
+    "alexandria": "Africa/Cairo",
+    # Africa
+    "marrakech": "Africa/Casablanca",
+    "casablanca": "Africa/Casablanca",
+    "rabat": "Africa/Casablanca",
+    "tunis": "Africa/Tunis",
+    "mauritius": "Indian/Mauritius",
+    "seychelles": "Indian/Mahe",
+    "johannesburg": "Africa/Johannesburg",
+    # Asia
+    "hong-kong": "Asia/Hong_Kong",
+    "macao": "Asia/Macau",
+    "beijing": "Asia/Shanghai",
+    "shanghai": "Asia/Shanghai",
+    "guangzhou": "Asia/Shanghai",
+    "shenzhen": "Asia/Shanghai",
+    "dalian": "Asia/Shanghai",
+    "tianjin": "Asia/Shanghai",
+    "suzhou": "Asia/Shanghai",
+    "hangzhou": "Asia/Shanghai",
+    "hoi-an": "Asia/Ho_Chi_Minh",
+    "tokyo": "Asia/Tokyo",
+    "kyoto": "Asia/Tokyo",
+    "osaka": "Asia/Tokyo",
+    "seoul": "Asia/Seoul",
+    "bangkok": "Asia/Bangkok",
+    "chiang-mai": "Asia/Bangkok",
+    "koh-samui": "Asia/Bangkok",
+    "kuala-lumpur": "Asia/Kuala_Lumpur",
+    "langkawi": "Asia/Kuala_Lumpur",
+    "singapore": "Asia/Singapore",
+    "bali": "Asia/Makassar",
+    "jakarta": "Asia/Jakarta",
+    "mumbai": "Asia/Kolkata",
+    "bengaluru": "Asia/Kolkata",
+    "maldives": "Indian/Maldives",
+    "maldives-landaa-giraavaru": "Indian/Maldives",
+    "maldives-kuda-huraa": "Indian/Maldives",
+    "maldives-voavah": "Indian/Maldives",
+    "palau": "Pacific/Palau",
+    # Pacific
+    "sydney": "Australia/Sydney",
+    "bora-bora": "Pacific/Tahiti",
+}
+
 BASE_URL = "https://www.fourseasons.com"
 UPCOMING_TRIPS_URL = f"{BASE_URL}/profile/api/upcoming-trips/"
 GLOBAL_STATE_URL = f"{BASE_URL}/profile/api/global-state/"
@@ -58,9 +199,10 @@ def strip_html(text):
 
 
 def parse_api_time(date_str, time_str):
-    """Parse 'YYYY-MM-DD' + 'HH:MM:SS.sssZ' into a UTC datetime."""
+    """Parse 'YYYY-MM-DD' + 'HH:MM:SS.sssZ' into a naive local datetime.
+    The Z suffix in FS API responses is misleading — times are local property time."""
     t = time_str.rstrip("Z").split(".")[0]
-    return datetime.strptime(f"{date_str}T{t}", "%Y-%m-%dT%H:%M:%S").replace(tzinfo=timezone.utc)
+    return datetime.strptime(f"{date_str}T{t}", "%Y-%m-%dT%H:%M:%S")
 
 
 def prepare_events(itinerary, confirmation_number):
@@ -70,6 +212,12 @@ def prepare_events(itinerary, confirmation_number):
     check_out_date = date.fromisoformat(summary["checkOutDate"])
     property_name = summary["propertyName"]
     now_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    tzid = PROPERTY_TIMEZONES.get(itinerary.get("propertyAnalytics", {}).get("id", ""))
+
+    def make_timed(dt, duration_hours=1):
+        """Return (dtstart, dtend, allday=False) using TZID if known, else floating."""
+        fmt = "%Y%m%dT%H%M%S"
+        return dt.strftime(fmt), (dt + timedelta(hours=duration_hours)).strftime(fmt), False
 
     # Multi-day stay event (all-day, spans check-in through check-out)
     events.append({
@@ -78,22 +226,25 @@ def prepare_events(itinerary, confirmation_number):
         "dtstamp": now_stamp,
         "summary": property_name,
         "allday": True,
+        "tzid": None,
         "dtstart": check_in_date.strftime("%Y%m%d"),
         "dtend": (check_out_date + timedelta(days=1)).strftime("%Y%m%d"),
         "location": property_name,
         "description": "",
     })
 
-    # Check-out event (noon, floating/local time since we don't have tz info)
+    # Check-out event (noon local time)
     co_dt = datetime.combine(check_out_date, datetime.strptime("12:00", "%H:%M").time())
+    co_start, co_end, _ = make_timed(co_dt)
     events.append({
         "uid": f"{confirmation_number}-checkout@fourseasons-calendar",
         "filename": "checkout.ics",
         "dtstamp": now_stamp,
         "summary": f"Check Out – {property_name}",
         "allday": False,
-        "dtstart": co_dt.strftime("%Y%m%dT%H%M%S"),
-        "dtend": (co_dt + timedelta(hours=1)).strftime("%Y%m%dT%H%M%S"),
+        "tzid": tzid,
+        "dtstart": co_start,
+        "dtend": co_end,
         "location": property_name,
         "description": "",
     })
@@ -103,13 +254,10 @@ def prepare_events(itinerary, confirmation_number):
         date_str = ti["date"]
 
         if item.get("type") == "arrival":
-            # checkInTime is "3:15 PM" local time — treat as floating (no tz suffix)
             checkin_str = item.get("checkInTime", "3:00 PM")
             try:
                 dt = datetime.strptime(f"{date_str} {checkin_str}", "%Y-%m-%d %I:%M %p")
-                dtstart = dt.strftime("%Y%m%dT%H%M%S")
-                dtend = (dt + timedelta(hours=1)).strftime("%Y%m%dT%H%M%S")
-                allday = False
+                dtstart, dtend, allday = make_timed(dt)
             except ValueError:
                 dtstart = check_in_date.strftime("%Y%m%d")
                 dtend = dtstart
@@ -121,6 +269,7 @@ def prepare_events(itinerary, confirmation_number):
                 "dtstamp": now_stamp,
                 "summary": f"Check In – {property_name}",
                 "allday": allday,
+                "tzid": tzid,
                 "dtstart": dtstart,
                 "dtend": dtend,
                 "location": property_name,
@@ -134,16 +283,17 @@ def prepare_events(itinerary, confirmation_number):
                 dtstart = allday_date
                 dtend = allday_date
                 allday = True
+                event_tzid = None
             else:
                 try:
                     dt = parse_api_time(date_str, time_str)
-                    dtstart = dt.strftime("%Y%m%dT%H%M%SZ")
-                    dtend = (dt + timedelta(hours=1)).strftime("%Y%m%dT%H%M%SZ")
-                    allday = False
+                    dtstart, dtend, allday = make_timed(dt)
+                    event_tzid = tzid
                 except (ValueError, AttributeError):
                     dtstart = allday_date
                     dtend = allday_date
                     allday = True
+                    event_tzid = None
 
             vendor = item.get("vendorNameOnItinerary", "")
             subtype = item.get("requestSubtype", "")
@@ -165,6 +315,7 @@ def prepare_events(itinerary, confirmation_number):
                 "dtstamp": now_stamp,
                 "summary": event_summary,
                 "allday": allday,
+                "tzid": event_tzid,
                 "dtstart": dtstart,
                 "dtend": dtend,
                 "location": item.get("departureLocation") or item.get("pickupLocation") or "",
