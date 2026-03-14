@@ -1,4 +1,3 @@
-import base64
 import hmac
 import json
 import os
@@ -15,11 +14,6 @@ load_dotenv()
 
 FS_COOKIES = os.environ["FS_COOKIES"]
 CRON_SECRET = os.environ["CRON_SECRET"]
-GITEA_URL = os.environ.get("GITEA_URL", "")
-GITEA_TOKEN = os.environ.get("GITEA_TOKEN", "")
-GITEA_OWNER = os.environ.get("GITEA_OWNER", "")
-GITEA_REPO = os.environ.get("GITEA_REPO", "")
-GITEA_BRANCH = os.environ.get("GITEA_BRANCH", "main")
 
 RADICALE_COLLECTIONS = "/data/collections/collection-root"
 RADICALE_USER = os.environ.get("RADICALE_USER", "")
@@ -372,44 +366,6 @@ def prepare_events(itinerary, confirmation_number):
     return events
 
 
-def list_gitea_dir(confirmation_number: str) -> dict[str, str]:
-    """Returns {filename: sha} for all files in the trip's directory."""
-    url = f"{GITEA_URL}/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/contents/{confirmation_number}"
-    headers = {"Authorization": f"token {GITEA_TOKEN}"}
-    resp = requests.get(url, headers=headers, params={"ref": GITEA_BRANCH})
-    if resp.status_code == 404:
-        return {}
-    resp.raise_for_status()
-    return {item["name"]: item["sha"] for item in resp.json() if item["type"] == "file"}
-
-
-def commit_event(confirmation_number: str, filename: str, ics_content: str, existing_sha: str | None = None) -> None:
-    file_path = f"{confirmation_number}/{filename}"
-    url = f"{GITEA_URL}/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/contents/{file_path}"
-    headers = {"Authorization": f"token {GITEA_TOKEN}"}
-    payload = {
-        "branch": GITEA_BRANCH,
-        "content": base64.b64encode(ics_content.encode()).decode(),
-        "message": f"Update {file_path}",
-    }
-    if existing_sha:
-        payload["sha"] = existing_sha
-        resp = requests.put(url, headers=headers, json=payload)
-    else:
-        resp = requests.post(url, headers=headers, json=payload)
-    resp.raise_for_status()
-
-
-def delete_gitea_file(file_path: str, sha: str) -> None:
-    url = f"{GITEA_URL}/api/v1/repos/{GITEA_OWNER}/{GITEA_REPO}/contents/{file_path}"
-    headers = {"Authorization": f"token {GITEA_TOKEN}"}
-    resp = requests.delete(url, headers=headers, json={
-        "branch": GITEA_BRANCH,
-        "message": f"Remove stale event {file_path}",
-        "sha": sha,
-    })
-    resp.raise_for_status()
-
 
 def git_commit_and_push(message: str) -> None:
     if not GIT_REMOTE_URL:
@@ -444,18 +400,6 @@ def write_to_radicale(confirmation_number: str, events: list) -> None:
         shutil.rmtree(cache_dir)
     git_commit_and_push(f"Sync {confirmation_number}")
 
-
-def sync_trip_to_gitea(confirmation_number: str, events: list) -> None:
-    if not all([GITEA_URL, GITEA_TOKEN, GITEA_OWNER, GITEA_REPO]):
-        return
-    existing = list_gitea_dir(confirmation_number)
-    new_filenames = {event["filename"] for event in events}
-    for event in events:
-        ics_content = render_template("event.ics", event=event)
-        commit_event(confirmation_number, event["filename"], ics_content, existing.get(event["filename"]))
-    for filename, sha in existing.items():
-        if filename not in new_filenames:
-            delete_gitea_file(f"{confirmation_number}/{filename}", sha)
 
 
 def login(session: requests.Session) -> None:
@@ -504,7 +448,6 @@ def run():
         booking_id = get_booking_id(session, confirmation_number)
         itinerary = get_itinerary(session, booking_id)
         events = prepare_events(itinerary, confirmation_number)
-        sync_trip_to_gitea(confirmation_number, events)
         write_to_radicale(confirmation_number, events)
 
     return f"Done. Processed {len(confirmation_numbers)} booking(s)."
