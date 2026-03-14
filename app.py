@@ -4,6 +4,7 @@ import json
 import os
 import re
 import shutil
+import subprocess
 import requests
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
@@ -23,6 +24,7 @@ GITEA_BRANCH = os.environ.get("GITEA_BRANCH", "main")
 RADICALE_COLLECTIONS = "/data/collections/collection-root"
 RADICALE_USER = os.environ.get("RADICALE_USER", "")
 RADICALE_CALENDAR = os.environ.get("RADICALE_CALENDAR", "four-seasons")
+GIT_REMOTE_URL = os.environ.get("GIT_REMOTE_URL", "")
 
 # Maps Four Seasons property slug (propertyAnalytics.id) to IANA timezone.
 # Times in the FS API use a misleading Z suffix but are actually local property times.
@@ -409,6 +411,21 @@ def delete_gitea_file(file_path: str, sha: str) -> None:
     resp.raise_for_status()
 
 
+def git_commit_and_push(message: str) -> None:
+    if not GIT_REMOTE_URL:
+        return
+    repo = RADICALE_COLLECTIONS
+    try:
+        subprocess.run(["git", "-C", repo, "add", "-A"], check=True, capture_output=True)
+        diff = subprocess.run(["git", "-C", repo, "diff", "--cached", "--quiet"], capture_output=True)
+        if diff.returncode == 0:
+            return  # nothing to commit
+        subprocess.run(["git", "-C", repo, "commit", "-m", message], check=True, capture_output=True)
+        subprocess.run(["git", "-C", repo, "push", "origin", "HEAD:main"], check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        app.logger.error("Git push failed: %s", e.stderr.decode(errors="replace"))
+
+
 def write_to_radicale(confirmation_number: str, events: list) -> None:
     if not RADICALE_USER:
         return
@@ -425,6 +442,7 @@ def write_to_radicale(confirmation_number: str, events: list) -> None:
     cache_dir = calendar_dir / ".Radicale.cache"
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
+    git_commit_and_push(f"Sync {confirmation_number}")
 
 
 def sync_trip_to_gitea(confirmation_number: str, events: list) -> None:

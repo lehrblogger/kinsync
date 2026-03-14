@@ -18,6 +18,19 @@ if [ -n "$RADICALE_USER" ] && [ -n "$RADICALE_CALENDAR" ]; then
     fi
 fi
 
+# Initialize git archive repo on first run
+if [ -n "$GIT_REMOTE_URL" ]; then
+    REPO="/data/collections/collection-root"
+    if [ ! -d "$REPO/.git" ]; then
+        git -C "$REPO" init
+        git -C "$REPO" config user.email "kinsync@fly.io"
+        git -C "$REPO" config user.name "kinsync"
+        git -C "$REPO" remote add origin "$GIT_REMOTE_URL"
+    else
+        git -C "$REPO" remote set-url origin "$GIT_REMOTE_URL"
+    fi
+fi
+
 # Make CRON_SECRET available to cron jobs
 echo "CRON_SECRET=$CRON_SECRET" >> /etc/environment
 
