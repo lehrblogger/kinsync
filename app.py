@@ -1,12 +1,13 @@
 import base64
 import hmac
+import json
 import os
 import re
 import shutil
 import requests
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
-from flask import Flask, abort, render_template, request
+from flask import Flask, abort, jsonify, render_template, request
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -293,3 +294,32 @@ def run():
         write_to_radicale(confirmation_number, events)
 
     return f"Done. Processed {len(confirmation_numbers)} booking(s)."
+
+
+@app.route("/debug")
+def debug():
+    if not hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {CRON_SECRET}"):
+        abort(401)
+
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Sec-Ch-Ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"macOS"',
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+    })
+
+    login(session)
+    confirmation_numbers = get_confirmation_numbers(session)
+
+    result = {}
+    for confirmation_number in confirmation_numbers:
+        booking_id = get_booking_id(session, confirmation_number)
+        itinerary = get_itinerary(session, booking_id)
+        result[confirmation_number] = itinerary
+
+    return jsonify(result)
