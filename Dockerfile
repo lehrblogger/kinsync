@@ -5,6 +5,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
         supervisor \
         apache2-utils \
         cron \
+        curl \
         git \
     && rm -rf /var/lib/apt/lists/*
 

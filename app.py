@@ -14,6 +14,7 @@ load_dotenv()
 
 FS_COOKIES = os.environ["FS_COOKIES"]
 CRON_SECRET = os.environ["CRON_SECRET"]
+COOKIES_FILE = "/data/fs_cookies.txt"
 
 RADICALE_COLLECTIONS = "/data/collections/collection-root"
 RADICALE_USER = os.environ.get("RADICALE_USER", "")
@@ -409,8 +410,15 @@ def write_to_radicale(confirmation_number: str, events: list) -> None:
 
 
 
+def get_cookies() -> str:
+    try:
+        return Path(COOKIES_FILE).read_text().strip()
+    except FileNotFoundError:
+        return FS_COOKIES
+
+
 def login(session: requests.Session) -> None:
-    session.headers.update({"Cookie": FS_COOKIES})
+    session.headers.update({"Cookie": get_cookies()})
 
 
 def get_confirmation_numbers(session: requests.Session) -> list[str]:
@@ -431,6 +439,17 @@ def get_itinerary(session: requests.Session, booking_id: str) -> dict:
     return resp.json()
 
 
+@app.route("/cookies", methods=["POST"])
+def cookies():
+    if not hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {CRON_SECRET}"):
+        abort(401)
+    value = request.get_data(as_text=True).strip()
+    if not value:
+        abort(400)
+    Path(COOKIES_FILE).write_text(value)
+    return "Cookies updated.\n"
+
+
 @app.route("/run")
 def run():
     if not hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {CRON_SECRET}"):
@@ -449,7 +468,12 @@ def run():
     })
 
     login(session)
-    confirmation_numbers = get_confirmation_numbers(session)
+    try:
+        confirmation_numbers = get_confirmation_numbers(session)
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 403:
+            return "FS cookies have expired. Update them via POST /cookies.", 403
+        raise
 
     for confirmation_number in confirmation_numbers:
         booking_id = get_booking_id(session, confirmation_number)
