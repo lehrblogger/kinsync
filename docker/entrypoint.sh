@@ -25,16 +25,6 @@ if [ -n "$RADICALE_SYNC_USER" ] && [ -n "$RADICALE_CALENDAR" ]; then
     fi
 fi
 
-# Migrate old calendar data from user namespace to shared namespace
-if [ -n "$RADICALE_USER" ] && [ -n "$RADICALE_SYNC_USER" ] && [ -n "$RADICALE_CALENDAR" ]; then
-    OLD_DIR="/data/collections/collection-root/$RADICALE_USER/$RADICALE_CALENDAR"
-    NEW_DIR="/data/collections/collection-root/$RADICALE_SYNC_USER/$RADICALE_CALENDAR"
-    if [ -d "$OLD_DIR" ] && [ ! "$(ls -A "$NEW_DIR" 2>/dev/null)" ]; then
-        cp -rn "$OLD_DIR/." "$NEW_DIR/"
-        echo "Migrated calendar data from $OLD_DIR to $NEW_DIR"
-    fi
-fi
-
 # Create default rights file on first run
 if [ ! -f /data/rights ] && [ -n "$RADICALE_SYNC_USER" ]; then
     cat > /data/rights << EOF

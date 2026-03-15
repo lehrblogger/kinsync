@@ -384,8 +384,6 @@ def git_commit_and_push(message: str) -> None:
 
 
 def write_to_radicale(confirmation_number: str, events: list) -> None:
-    if not RADICALE_SYNC_USER:
-        return
     calendar_dir = Path(f"{RADICALE_COLLECTIONS}/{RADICALE_SYNC_USER}/{RADICALE_CALENDAR}")
     calendar_dir.mkdir(parents=True, exist_ok=True)
     new_filenames = set()
