@@ -262,7 +262,7 @@ def write_to_radicale(calendar: str, key: str, events: list) -> None:
 
     cache_dir = calendar_dir / ".Radicale.cache"
     if cache_dir.exists():
-        shutil.rmtree(cache_dir)
+        shutil.rmtree(cache_dir, ignore_errors=True)
 
 
 # ---------------------------------------------------------------------------
