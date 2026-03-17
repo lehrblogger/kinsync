@@ -14,7 +14,8 @@
       "Bash(fly status:*)",
       "Bash(fly secrets:*)",
       "Bash(fly ssh:*)",
-      "Bash(ls -la *.py *.json)"
+      "Bash(ls -la *.py *.json)",
+      "Bash(xargs ls:*)"
     ]
   }
 }
