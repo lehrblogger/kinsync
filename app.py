@@ -20,6 +20,7 @@ RADICALE_COLLECTIONS = "/data/collections/collection-root"
 RADICALE_SYNC_USER = os.environ["RADICALE_SYNC_USER"]
 RADICALE_CALENDAR = os.environ.get("RADICALE_CALENDAR", "four-seasons")
 GIT_REMOTE_URL = os.environ.get("GIT_REMOTE_URL", "")
+JSON_STORE = "/data/json"
 
 # Maps Four Seasons property slug (propertyAnalytics.id) to IANA timezone.
 # Times in the FS API use a misleading Z suffix but are actually local property times.
@@ -371,7 +372,7 @@ def prepare_events(itinerary, confirmation_number):
 def git_commit_and_push(message: str) -> None:
     if not GIT_REMOTE_URL:
         return
-    repo = RADICALE_COLLECTIONS
+    repo = JSON_STORE
     try:
         subprocess.run(["git", "-C", repo, "add", "-A"], check=True, capture_output=True)
         diff = subprocess.run(["git", "-C", repo, "diff", "--cached", "--quiet"], capture_output=True)
@@ -381,6 +382,17 @@ def git_commit_and_push(message: str) -> None:
         subprocess.run(["git", "-C", repo, "push", "--force", "origin", "HEAD:main"], check=True, capture_output=True)
     except subprocess.CalledProcessError as e:
         app.logger.error("Git push failed: %s", e.stderr.decode(errors="replace"))
+
+
+def save_itinerary_json(confirmation_number: str, itinerary: dict) -> None:
+    json_dir = Path(f"{JSON_STORE}/{RADICALE_CALENDAR}")
+    json_dir.mkdir(parents=True, exist_ok=True)
+    json_path = json_dir / f"{confirmation_number}.json"
+    new_content = json.dumps(itinerary, indent=2, ensure_ascii=False)
+    if json_path.exists() and json_path.read_text() == new_content:
+        return
+    json_path.write_text(new_content)
+    git_commit_and_push(f"Sync {confirmation_number}")
 
 
 def write_to_radicale(confirmation_number: str, events: list) -> None:
@@ -404,7 +416,6 @@ def write_to_radicale(confirmation_number: str, events: list) -> None:
     cache_dir = calendar_dir / ".Radicale.cache"
     if cache_dir.exists():
         shutil.rmtree(cache_dir)
-    git_commit_and_push(f"Sync {confirmation_number}")
 
 
 
@@ -473,13 +484,28 @@ def run():
             return "FS cookies have expired. Update them via POST /cookies.", 403
         raise
 
+    live = set()
     for confirmation_number in confirmation_numbers:
         booking_id = get_booking_id(session, confirmation_number)
         itinerary = get_itinerary(session, booking_id)
+        save_itinerary_json(confirmation_number, itinerary)
         events = prepare_events(itinerary, confirmation_number)
         write_to_radicale(confirmation_number, events)
+        live.add(confirmation_number)
 
-    return f"Done. Processed {len(confirmation_numbers)} booking(s)."
+    json_dir = Path(f"{JSON_STORE}/{RADICALE_CALENDAR}")
+    past = 0
+    if json_dir.exists():
+        for json_path in sorted(json_dir.glob("*.json")):
+            confirmation_number = json_path.stem
+            if confirmation_number in live:
+                continue
+            itinerary = json.loads(json_path.read_text())
+            events = prepare_events(itinerary, confirmation_number)
+            write_to_radicale(confirmation_number, events)
+            past += 1
+
+    return f"Done. {len(live)} live booking(s), {past} past booking(s) regenerated."
 
 
 @app.route("/debug")

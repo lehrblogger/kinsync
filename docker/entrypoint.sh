@@ -50,7 +50,8 @@ fi
 
 # Initialize git archive repo on first run
 if [ -n "$GIT_REMOTE_URL" ]; then
-    REPO="/data/collections/collection-root"
+    REPO="/data/json"
+    mkdir -p "$REPO"
     if [ ! -d "$REPO/.git" ]; then
         git -C "$REPO" init
         git -C "$REPO" config user.email "kinsync@fly.io"
