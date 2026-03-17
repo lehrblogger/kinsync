@@ -7,8 +7,10 @@ import subprocess
 import requests
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
+from zoneinfo import ZoneInfo
 from flask import Flask, abort, jsonify, render_template, request
 from dotenv import load_dotenv
+from timezonefinder import TimezoneFinder
 
 load_dotenv()
 
@@ -19,8 +21,12 @@ COOKIES_FILE = "/data/fs_cookies.txt"
 RADICALE_COLLECTIONS = "/data/collections/collection-root"
 RADICALE_SYNC_USER = os.environ["RADICALE_SYNC_USER"]
 RADICALE_CALENDAR = os.environ.get("RADICALE_CALENDAR", "four-seasons")
+WANDERLOG_COOKIE = os.environ.get("WANDERLOG_COOKIE", "")
+WANDERLOG_CALENDAR = os.environ.get("WANDERLOG_CALENDAR", "wanderlog")
 GIT_REMOTE_URL = os.environ.get("GIT_REMOTE_URL", "")
 JSON_STORE = "/data/json"
+
+WANDERLOG_API_URL = "https://wanderlog.com/api/tripPlans"
 
 # Maps Four Seasons property slug (propertyAnalytics.id) to IANA timezone.
 # Times in the FS API use a misleading Z suffix but are actually local property times.
@@ -163,15 +169,21 @@ PROPERTY_TIMEZONES = {
     "bora-bora": "Pacific/Tahiti",
 }
 
-BASE_URL = "https://www.fourseasons.com"
-UPCOMING_TRIPS_URL = f"{BASE_URL}/profile/api/upcoming-trips/"
-GLOBAL_STATE_URL = f"{BASE_URL}/profile/api/global-state/"
-ITINERARY_URL = f"{BASE_URL}/profile/api/itinerary/"
+FS_BASE_URL = "https://www.fourseasons.com"
+UPCOMING_TRIPS_URL = f"{FS_BASE_URL}/profile/api/upcoming-trips/"
+GLOBAL_STATE_URL = f"{FS_BASE_URL}/profile/api/global-state/"
+ITINERARY_URL = f"{FS_BASE_URL}/profile/api/itinerary/"
 
 app = Flask(__name__)
 app.jinja_env.trim_blocks = True
 app.jinja_env.lstrip_blocks = True
 
+_tf = TimezoneFinder()
+
+
+# ---------------------------------------------------------------------------
+# Shared utilities
+# ---------------------------------------------------------------------------
 
 def ical_escape(text):
     if not text:
@@ -195,6 +207,66 @@ def strip_html(text):
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
+
+# ---------------------------------------------------------------------------
+# Shared Radicale / storage helpers
+# ---------------------------------------------------------------------------
+
+def git_commit_and_push(message: str) -> None:
+    if not GIT_REMOTE_URL:
+        return
+    repo = JSON_STORE
+    try:
+        subprocess.run(["git", "-C", repo, "add", "-A"], check=True, capture_output=True)
+        diff = subprocess.run(["git", "-C", repo, "diff", "--cached", "--quiet"], capture_output=True)
+        if diff.returncode == 0:
+            return  # nothing to commit
+        subprocess.run(["git", "-C", repo, "commit", "-m", message], check=True, capture_output=True)
+        subprocess.run(["git", "-C", repo, "push", "--force", "origin", "HEAD:main"], check=True, capture_output=True)
+    except subprocess.CalledProcessError as e:
+        app.logger.error("Git push failed: %s", e.stderr.decode(errors="replace"))
+
+
+def save_trip_json(calendar: str, key: str, data: dict) -> None:
+    json_dir = Path(f"{JSON_STORE}/{calendar}")
+    json_dir.mkdir(parents=True, exist_ok=True)
+    json_path = json_dir / f"{key}.json"
+    new_content = json.dumps(data, indent=2, ensure_ascii=False)
+    if json_path.exists() and json_path.read_text() == new_content:
+        return
+    json_path.write_text(new_content)
+    git_commit_and_push(f"Sync {key}")
+
+
+def write_to_radicale(calendar: str, key: str, events: list) -> None:
+    calendar_dir = Path(f"{RADICALE_COLLECTIONS}/{RADICALE_SYNC_USER}/{calendar}")
+    calendar_dir.mkdir(parents=True, exist_ok=True)
+
+    def without_dtstamp(content):
+        return "\n".join(l for l in content.splitlines() if not l.startswith("DTSTAMP:"))
+
+    new_filenames = set()
+    for event in events:
+        dest_filename = f"{key}-{event['filename']}"
+        new_filenames.add(dest_filename)
+        dest_path = calendar_dir / dest_filename
+        new_content = render_template("event.ics", event=event)
+        if dest_path.exists() and without_dtstamp(dest_path.read_text()) == without_dtstamp(new_content):
+            continue
+        dest_path.write_text(new_content)
+
+    for f in calendar_dir.glob(f"{key}-*.ics"):
+        if f.name not in new_filenames:
+            f.unlink()
+
+    cache_dir = calendar_dir / ".Radicale.cache"
+    if cache_dir.exists():
+        shutil.rmtree(cache_dir)
+
+
+# ---------------------------------------------------------------------------
+# Four Seasons
+# ---------------------------------------------------------------------------
 
 def parse_duration_hours(duration_str):
     """Parse FS duration strings like '1 Hour', '2.5 hours', '45 minutes', 'Approx. 2.5 Hours'.
@@ -229,7 +301,7 @@ def _item_location(item, property_name):
     return item.get("departureLocation") or pickup or dropoff or property_name
 
 
-def prepare_events(itinerary, confirmation_number):
+def prepare_fs_events(itinerary, confirmation_number):
     events = []
     summary = itinerary["bookingSummary"]
     check_in_date = date.fromisoformat(summary["checkInDate"])
@@ -239,7 +311,6 @@ def prepare_events(itinerary, confirmation_number):
     tzid = PROPERTY_TIMEZONES.get(itinerary.get("propertyAnalytics", {}).get("id", ""))
 
     def make_timed(dt, duration_hours=1):
-        """Return (dtstart, dtend, allday=False) using TZID if known, else floating."""
         fmt = "%Y%m%dT%H%M%S"
         return dt.strftime(fmt), (dt + timedelta(hours=duration_hours)).strftime(fmt), False
 
@@ -255,6 +326,7 @@ def prepare_events(itinerary, confirmation_number):
         "dtend": (check_out_date + timedelta(days=1)).strftime("%Y%m%d"),
         "location": property_name,
         "description": "",
+        "url": "",
     })
 
     # Check-out event (noon local time)
@@ -271,6 +343,7 @@ def prepare_events(itinerary, confirmation_number):
         "dtend": co_end,
         "location": property_name,
         "description": "",
+        "url": "",
     })
 
     for i, ti in enumerate(itinerary.get("timelineItems", [])):
@@ -298,6 +371,7 @@ def prepare_events(itinerary, confirmation_number):
                 "dtend": dtend,
                 "location": property_name,
                 "description": strip_html(item.get("disclaimer", "")),
+                "url": "",
             })
 
         else:
@@ -363,89 +437,273 @@ def prepare_events(itinerary, confirmation_number):
                 "dtend": dtend,
                 "location": _item_location(item, property_name),
                 "description": "\n\n".join(desc_parts),
+                "url": "",
             })
 
     return events
 
 
-
-def git_commit_and_push(message: str) -> None:
-    if not GIT_REMOTE_URL:
-        return
-    repo = JSON_STORE
-    try:
-        subprocess.run(["git", "-C", repo, "add", "-A"], check=True, capture_output=True)
-        diff = subprocess.run(["git", "-C", repo, "diff", "--cached", "--quiet"], capture_output=True)
-        if diff.returncode == 0:
-            return  # nothing to commit
-        subprocess.run(["git", "-C", repo, "commit", "-m", message], check=True, capture_output=True)
-        subprocess.run(["git", "-C", repo, "push", "--force", "origin", "HEAD:main"], check=True, capture_output=True)
-    except subprocess.CalledProcessError as e:
-        app.logger.error("Git push failed: %s", e.stderr.decode(errors="replace"))
-
-
-def save_itinerary_json(confirmation_number: str, itinerary: dict) -> None:
-    json_dir = Path(f"{JSON_STORE}/{RADICALE_CALENDAR}")
-    json_dir.mkdir(parents=True, exist_ok=True)
-    json_path = json_dir / f"{confirmation_number}.json"
-    new_content = json.dumps(itinerary, indent=2, ensure_ascii=False)
-    if json_path.exists() and json_path.read_text() == new_content:
-        return
-    json_path.write_text(new_content)
-    git_commit_and_push(f"Sync {confirmation_number}")
-
-
-def write_to_radicale(confirmation_number: str, events: list) -> None:
-    calendar_dir = Path(f"{RADICALE_COLLECTIONS}/{RADICALE_SYNC_USER}/{RADICALE_CALENDAR}")
-    calendar_dir.mkdir(parents=True, exist_ok=True)
-    new_filenames = set()
-    def without_dtstamp(content):
-        return "\n".join(l for l in content.splitlines() if not l.startswith("DTSTAMP:"))
-
-    for event in events:
-        dest_filename = f"{confirmation_number}-{event['filename']}"
-        new_filenames.add(dest_filename)
-        dest_path = calendar_dir / dest_filename
-        new_content = render_template("event.ics", event=event)
-        if dest_path.exists() and without_dtstamp(dest_path.read_text()) == without_dtstamp(new_content):
-            continue
-        dest_path.write_text(new_content)
-    for f in calendar_dir.glob(f"{confirmation_number}-*.ics"):
-        if f.name not in new_filenames:
-            f.unlink()
-    cache_dir = calendar_dir / ".Radicale.cache"
-    if cache_dir.exists():
-        shutil.rmtree(cache_dir)
-
-
-
-def get_cookies() -> str:
+def get_fs_cookies() -> str:
     try:
         return Path(COOKIES_FILE).read_text().strip()
     except FileNotFoundError:
         return FS_COOKIES
 
 
-def login(session: requests.Session) -> None:
-    session.headers.update({"Cookie": get_cookies()})
+def fs_login(session: requests.Session) -> None:
+    session.headers.update({"Cookie": get_fs_cookies()})
 
 
-def get_confirmation_numbers(session: requests.Session) -> list[str]:
+def get_fs_confirmation_numbers(session: requests.Session) -> list[str]:
     resp = session.get(UPCOMING_TRIPS_URL)
     resp.raise_for_status()
     return [trip["confirmationNumber"] for trip in resp.json()["trips"]]
 
 
-def get_booking_id(session: requests.Session, confirmation_number: str) -> str:
+def get_fs_booking_id(session: requests.Session, confirmation_number: str) -> str:
     resp = session.get(GLOBAL_STATE_URL, params={"orsConfirmationNumber": confirmation_number})
     resp.raise_for_status()
     return resp.json()["activeBookingId"]
 
 
-def get_itinerary(session: requests.Session, booking_id: str) -> dict:
+def get_fs_itinerary(session: requests.Session, booking_id: str) -> dict:
     resp = session.get(ITINERARY_URL, params={"bookingId": booking_id, "currencyCode": "USD"})
     resp.raise_for_status()
     return resp.json()
+
+
+def make_fs_session() -> requests.Session:
+    session = requests.Session()
+    session.headers.update({
+        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
+        "Accept": "*/*",
+        "Sec-Ch-Ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
+        "Sec-Ch-Ua-Mobile": "?0",
+        "Sec-Ch-Ua-Platform": '"macOS"',
+        "Sec-Fetch-Dest": "empty",
+        "Sec-Fetch-Mode": "cors",
+        "Sec-Fetch-Site": "same-origin",
+    })
+    return session
+
+
+def sync_four_seasons() -> str:
+    session = make_fs_session()
+    fs_login(session)
+    try:
+        confirmation_numbers = get_fs_confirmation_numbers(session)
+    except requests.HTTPError as e:
+        if e.response is not None and e.response.status_code == 403:
+            return "FS cookies have expired. Update them via POST /cookies."
+        raise
+
+    live = set()
+    for confirmation_number in confirmation_numbers:
+        booking_id = get_fs_booking_id(session, confirmation_number)
+        itinerary = get_fs_itinerary(session, booking_id)
+        save_trip_json(RADICALE_CALENDAR, confirmation_number, itinerary)
+        events = prepare_fs_events(itinerary, confirmation_number)
+        write_to_radicale(RADICALE_CALENDAR, confirmation_number, events)
+        live.add(confirmation_number)
+
+    past = 0
+    json_dir = Path(f"{JSON_STORE}/{RADICALE_CALENDAR}")
+    if json_dir.exists():
+        for json_path in sorted(json_dir.glob("*.json")):
+            confirmation_number = json_path.stem
+            if confirmation_number in live:
+                continue
+            itinerary = json.loads(json_path.read_text())
+            events = prepare_fs_events(itinerary, confirmation_number)
+            write_to_radicale(RADICALE_CALENDAR, confirmation_number, events)
+            past += 1
+
+    return f"four-seasons: {len(live)} live booking(s), {past} past booking(s) regenerated."
+
+
+def debug_four_seasons() -> dict:
+    session = make_fs_session()
+    fs_login(session)
+    confirmation_numbers = get_fs_confirmation_numbers(session)
+    return {cn: get_fs_itinerary(session, get_fs_booking_id(session, cn)) for cn in confirmation_numbers}
+
+
+# ---------------------------------------------------------------------------
+# Wanderlog
+# ---------------------------------------------------------------------------
+
+def get_wanderlog_trip_ids() -> list[str]:
+    resp = requests.get(
+        f"{WANDERLOG_API_URL}/myProfile",
+        headers={"Cookie": WANDERLOG_COOKIE},
+    )
+    resp.raise_for_status()
+    return [t["key"] for t in resp.json().get("tripPlans", []) if t.get("key")]
+
+
+def get_wanderlog_trip(trip_id: str) -> dict:
+    resp = requests.get(f"{WANDERLOG_API_URL}/{trip_id}?clientSchemaVersion=2&registerView=true")
+    resp.raise_for_status()
+    return resp.json()
+
+
+def prepare_wanderlog_events(trip: dict, trip_key: str) -> list:
+    events = []
+    now_stamp = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ")
+    trip_plan = trip.get("tripPlan", {})
+    trip_url = f"https://wanderlog.com/plan/{trip_plan.get('key', trip_key)}/"
+
+    # First pass: collect lodging info keyed by date
+    lodging_loc = {}
+    lodging_desc = {}
+    lodging_url = {}
+    for section in trip_plan.get("itinerary", {}).get("sections", []):
+        if section.get("mode") != "placeList" or section.get("type") != "hotels":
+            continue
+        for block in section.get("blocks", []):
+            place = block.get("place", {})
+            hotel = block.get("hotel", {})
+            name = place.get("name", "")
+            formatted_address = place.get("formatted_address", "")
+            if formatted_address and not formatted_address.startswith(name):
+                formatted_address = f"{name}, {formatted_address}"
+            location = formatted_address or name
+
+            other_info = ""
+            for text_op in block.get("text", {}).get("ops", []):
+                link = text_op.get("attributes", {}).get("link", "")
+                other_info += link if link else text_op.get("insert", "")
+
+            info_parts = []
+            if hotel.get("confirmationNumber"):
+                info_parts.append(f"Confirmation: {hotel['confirmationNumber']}")
+            if other_info.strip():
+                info_parts.append(other_info.strip())
+
+            hotel_url = place.get("website") or place.get("url") or ""
+            check_in = datetime.strptime(hotel["checkIn"], "%Y-%m-%d")
+            check_out = datetime.strptime(hotel["checkOut"], "%Y-%m-%d")
+            current = check_in
+            while current < check_out:
+                d = current.strftime("%Y-%m-%d")
+                lodging_loc[d] = location
+                lodging_desc[d] = "\n\n".join(info_parts)
+                lodging_url[d] = hotel_url
+                current += timedelta(days=1)
+
+    # Second pass: build events from day plans
+    for section in trip_plan.get("itinerary", {}).get("sections", []):
+        if section.get("mode") != "dayPlan":
+            continue
+        heading = section.get("heading")
+        date_str = section.get("date")
+
+        if heading and date_str:
+            allday_str = datetime.strptime(date_str, "%Y-%m-%d").strftime("%Y%m%d")
+            events.append({
+                "uid": f"{trip_key}-day-{date_str}@wanderlog-calendar",
+                "filename": f"day-{date_str}.ics",
+                "dtstamp": now_stamp,
+                "summary": heading,
+                "allday": True,
+                "tzid": None,
+                "dtstart": allday_str,
+                "dtend": allday_str,
+                "location": lodging_loc.get(date_str, ""),
+                "description": lodging_desc.get(date_str, ""),
+                "url": lodging_url.get(date_str) or trip_url,
+            })
+
+        for i, block in enumerate(section.get("blocks", [])):
+            if block.get("type") != "place":
+                continue
+            place = block.get("place", {})
+            place_name = place.get("name", "")
+            lat = place.get("geometry", {}).get("location", {}).get("lat")
+            lng = place.get("geometry", {}).get("location", {}).get("lng")
+            start_time = block.get("startTime")
+            end_time = block.get("endTime")
+
+            if not place_name or not lat or not lng or not start_time:
+                continue
+
+            # Derive summary/description from text ops
+            summary = place_name
+            description = ""
+            for text_op in block.get("text", {}).get("ops", []):
+                link = text_op.get("attributes", {}).get("link", "")
+                description += link if link else text_op.get("insert", "")
+            if description:
+                parts = description.split("\n", 1)
+                name_part = parts[0].strip(".").strip()
+                if name_part:
+                    summary = name_part
+                description = parts[1].strip() if len(parts) > 1 else ""
+
+            formatted_address = place.get("formatted_address", "")
+            location = f"{place_name}, {formatted_address}" if formatted_address else place_name
+
+            tz_name = _tf.timezone_at(lng=lng, lat=lat)
+            fmt = "%Y%m%dT%H%M%S"
+            begin_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M")
+            end_dt = begin_dt + timedelta(minutes=1)
+            if end_time:
+                end_dt = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M")
+
+            events.append({
+                "uid": f"{trip_key}-place-{date_str}-{i}@wanderlog-calendar",
+                "filename": f"place-{date_str}-{i}.ics",
+                "dtstamp": now_stamp,
+                "summary": summary,
+                "allday": False,
+                "tzid": tz_name,
+                "dtstart": begin_dt.strftime(fmt),
+                "dtend": end_dt.strftime(fmt),
+                "location": location,
+                "description": description,
+                "url": place.get("website") or place.get("url") or "",
+            })
+
+    return events
+
+
+def sync_wanderlog() -> str:
+    trip_ids = get_wanderlog_trip_ids()
+    live = set()
+    for trip_id in trip_ids:
+        trip = get_wanderlog_trip(trip_id)
+        save_trip_json(WANDERLOG_CALENDAR, trip_id, trip)
+        events = prepare_wanderlog_events(trip, trip_id)
+        write_to_radicale(WANDERLOG_CALENDAR, trip_id, events)
+        live.add(trip_id)
+
+    past = 0
+    json_dir = Path(f"{JSON_STORE}/{WANDERLOG_CALENDAR}")
+    if json_dir.exists():
+        for json_path in sorted(json_dir.glob("*.json")):
+            trip_id = json_path.stem
+            if trip_id in live:
+                continue
+            trip = json.loads(json_path.read_text())
+            events = prepare_wanderlog_events(trip, trip_id)
+            write_to_radicale(WANDERLOG_CALENDAR, trip_id, events)
+            past += 1
+
+    return f"wanderlog: {len(live)} live trip(s), {past} past trip(s) regenerated."
+
+
+def debug_wanderlog() -> dict:
+    return {trip_id: get_wanderlog_trip(trip_id) for trip_id in get_wanderlog_trip_ids()}
+
+
+# ---------------------------------------------------------------------------
+# Routes
+# ---------------------------------------------------------------------------
+
+def _requested_calendars() -> set[str] | None:
+    """Return the set of calendars requested via ?calendars=, or None for all."""
+    param = request.args.get("calendars", "").strip()
+    return set(param.split(",")) if param else None
 
 
 @app.route("/cookies", methods=["POST"])
@@ -464,48 +722,16 @@ def run():
     if not hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {CRON_SECRET}"):
         abort(401)
 
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-        "Accept": "*/*",
-        "Sec-Ch-Ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"macOS"',
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
-    })
+    requested = _requested_calendars()
+    results = []
 
-    login(session)
-    try:
-        confirmation_numbers = get_confirmation_numbers(session)
-    except requests.HTTPError as e:
-        if e.response is not None and e.response.status_code == 403:
-            return "FS cookies have expired. Update them via POST /cookies.", 403
-        raise
+    if requested is None or RADICALE_CALENDAR in requested:
+        results.append(sync_four_seasons())
 
-    live = set()
-    for confirmation_number in confirmation_numbers:
-        booking_id = get_booking_id(session, confirmation_number)
-        itinerary = get_itinerary(session, booking_id)
-        save_itinerary_json(confirmation_number, itinerary)
-        events = prepare_events(itinerary, confirmation_number)
-        write_to_radicale(confirmation_number, events)
-        live.add(confirmation_number)
+    if (requested is None or WANDERLOG_CALENDAR in requested) and WANDERLOG_COOKIE:
+        results.append(sync_wanderlog())
 
-    json_dir = Path(f"{JSON_STORE}/{RADICALE_CALENDAR}")
-    past = 0
-    if json_dir.exists():
-        for json_path in sorted(json_dir.glob("*.json")):
-            confirmation_number = json_path.stem
-            if confirmation_number in live:
-                continue
-            itinerary = json.loads(json_path.read_text())
-            events = prepare_events(itinerary, confirmation_number)
-            write_to_radicale(confirmation_number, events)
-            past += 1
-
-    return f"Done. {len(live)} live booking(s), {past} past booking(s) regenerated."
+    return "\n".join(results) if results else "No calendars configured or matched.\n"
 
 
 @app.route("/debug")
@@ -513,25 +739,13 @@ def debug():
     if not hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {CRON_SECRET}"):
         abort(401)
 
-    session = requests.Session()
-    session.headers.update({
-        "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/145.0.0.0 Safari/537.36",
-        "Accept": "*/*",
-        "Sec-Ch-Ua": '"Not:A-Brand";v="99", "Google Chrome";v="145", "Chromium";v="145"',
-        "Sec-Ch-Ua-Mobile": "?0",
-        "Sec-Ch-Ua-Platform": '"macOS"',
-        "Sec-Fetch-Dest": "empty",
-        "Sec-Fetch-Mode": "cors",
-        "Sec-Fetch-Site": "same-origin",
-    })
-
-    login(session)
-    confirmation_numbers = get_confirmation_numbers(session)
-
+    requested = _requested_calendars()
     result = {}
-    for confirmation_number in confirmation_numbers:
-        booking_id = get_booking_id(session, confirmation_number)
-        itinerary = get_itinerary(session, booking_id)
-        result[confirmation_number] = itinerary
+
+    if requested is None or RADICALE_CALENDAR in requested:
+        result[RADICALE_CALENDAR] = debug_four_seasons()
+
+    if (requested is None or WANDERLOG_CALENDAR in requested) and WANDERLOG_COOKIE:
+        result[WANDERLOG_CALENDAR] = debug_wanderlog()
 
     return jsonify(result)

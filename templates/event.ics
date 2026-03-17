@@ -21,5 +21,8 @@ LOCATION:{{ event.location | ical_escape }}
 {% if event.description %}
 DESCRIPTION:{{ event.description | ical_escape }}
 {% endif %}
+{% if event.url %}
+URL:{{ event.url }}
+{% endif %}
 END:VEVENT
 END:VCALENDAR
