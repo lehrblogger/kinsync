@@ -495,14 +495,14 @@ def make_fs_session() -> requests.Session:
     return session
 
 
-def sync_four_seasons() -> str:
+def sync_four_seasons() -> dict:
     session = make_fs_session()
     fs_login(session)
     try:
         confirmation_numbers = get_fs_confirmation_numbers(session)
     except requests.HTTPError as e:
         if e.response is not None and e.response.status_code == 403:
-            return f"FS cookies have expired. Update them via POST /cookies?calendar={FS_CALENDAR}"
+            return {"error": f"FS cookies have expired. Update them via POST /cookies?calendar={FS_CALENDAR}"}
         raise
 
     live = set()
@@ -526,7 +526,7 @@ def sync_four_seasons() -> str:
             write_to_radicale(FS_CALENDAR, confirmation_number, events)
             past += 1
 
-    return f"four-seasons: {len(live)} live booking(s), {past} past booking(s) regenerated."
+    return {"live": len(live), "past": past}
 
 
 def debug_four_seasons() -> dict:
@@ -675,7 +675,7 @@ def prepare_wanderlog_events(trip: dict, trip_key: str) -> list:
     return events
 
 
-def sync_wanderlog() -> str:
+def sync_wanderlog() -> dict:
     trip_ids = get_wanderlog_trip_ids()
     live = set()
     for trip_id in trip_ids:
@@ -697,7 +697,7 @@ def sync_wanderlog() -> str:
             write_to_radicale(WANDERLOG_CALENDAR, trip_id, events)
             past += 1
 
-    return f"wanderlog: {len(live)} live trip(s), {past} past trip(s) regenerated."
+    return {"live": len(live), "past": past}
 
 
 def debug_wanderlog() -> dict:
@@ -738,15 +738,15 @@ def run():
         abort(401)
 
     requested = _requested_calendars()
-    results = []
+    result = {}
 
     if (requested is None or FS_CALENDAR in requested) and FS_COOKIES:
-        results.append(sync_four_seasons())
+        result[FS_CALENDAR] = sync_four_seasons()
 
     if (requested is None or WANDERLOG_CALENDAR in requested) and WANDERLOG_COOKIE:
-        results.append(sync_wanderlog())
+        result[WANDERLOG_CALENDAR] = sync_wanderlog()
 
-    return "\n".join(results) if results else "No calendars configured or matched.\n"
+    return jsonify(result)
 
 
 @app.route("/debug")
