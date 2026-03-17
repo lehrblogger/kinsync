@@ -14,13 +14,13 @@ from timezonefinder import TimezoneFinder
 
 load_dotenv()
 
-FS_COOKIES = os.environ["FS_COOKIES"]
+FS_COOKIES = os.environ.get("FS_COOKIES", "")
 CRON_SECRET = os.environ["CRON_SECRET"]
 COOKIES_FILE = "/data/fs_cookies.txt"
 
 RADICALE_COLLECTIONS = "/data/collections/collection-root"
 RADICALE_SYNC_USER = os.environ["RADICALE_SYNC_USER"]
-RADICALE_CALENDAR = os.environ.get("RADICALE_CALENDAR", "four-seasons")
+FS_CALENDAR = os.environ.get("FS_CALENDAR", "four-seasons")
 WANDERLOG_COOKIE = os.environ.get("WANDERLOG_COOKIE", "")
 WANDERLOG_CALENDAR = os.environ.get("WANDERLOG_CALENDAR", "wanderlog")
 GIT_REMOTE_URL = os.environ.get("GIT_REMOTE_URL", "")
@@ -501,13 +501,13 @@ def sync_four_seasons() -> str:
     for confirmation_number in confirmation_numbers:
         booking_id = get_fs_booking_id(session, confirmation_number)
         itinerary = get_fs_itinerary(session, booking_id)
-        save_trip_json(RADICALE_CALENDAR, confirmation_number, itinerary)
+        save_trip_json(FS_CALENDAR, confirmation_number, itinerary)
         events = prepare_fs_events(itinerary, confirmation_number)
-        write_to_radicale(RADICALE_CALENDAR, confirmation_number, events)
+        write_to_radicale(FS_CALENDAR, confirmation_number, events)
         live.add(confirmation_number)
 
     past = 0
-    json_dir = Path(f"{JSON_STORE}/{RADICALE_CALENDAR}")
+    json_dir = Path(f"{JSON_STORE}/{FS_CALENDAR}")
     if json_dir.exists():
         for json_path in sorted(json_dir.glob("*.json")):
             confirmation_number = json_path.stem
@@ -515,7 +515,7 @@ def sync_four_seasons() -> str:
                 continue
             itinerary = json.loads(json_path.read_text())
             events = prepare_fs_events(itinerary, confirmation_number)
-            write_to_radicale(RADICALE_CALENDAR, confirmation_number, events)
+            write_to_radicale(FS_CALENDAR, confirmation_number, events)
             past += 1
 
     return f"four-seasons: {len(live)} live booking(s), {past} past booking(s) regenerated."
@@ -725,7 +725,7 @@ def run():
     requested = _requested_calendars()
     results = []
 
-    if requested is None or RADICALE_CALENDAR in requested:
+    if (requested is None or FS_CALENDAR in requested) and FS_COOKIES:
         results.append(sync_four_seasons())
 
     if (requested is None or WANDERLOG_CALENDAR in requested) and WANDERLOG_COOKIE:
@@ -742,8 +742,8 @@ def debug():
     requested = _requested_calendars()
     result = {}
 
-    if requested is None or RADICALE_CALENDAR in requested:
-        result[RADICALE_CALENDAR] = debug_four_seasons()
+    if (requested is None or FS_CALENDAR in requested) and FS_COOKIES:
+        result[FS_CALENDAR] = debug_four_seasons()
 
     if (requested is None or WANDERLOG_CALENDAR in requested) and WANDERLOG_COOKIE:
         result[WANDERLOG_CALENDAR] = debug_wanderlog()
