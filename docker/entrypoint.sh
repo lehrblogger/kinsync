@@ -15,13 +15,23 @@ if [ -n "$RADICALE_USER" ] && [ -n "$RADICALE_PASSWORD" ]; then
     fi
 fi
 
-# Create shared calendar collection on first run
-if [ -n "$RADICALE_SYNC_USER" ] && [ -n "$RADICALE_CALENDAR" ]; then
-    CALENDAR_DIR="/data/collections/collection-root/$RADICALE_SYNC_USER/$RADICALE_CALENDAR"
-    mkdir -p "$CALENDAR_DIR"
-    if [ ! -f "$CALENDAR_DIR/.Radicale.props" ]; then
-        echo '{"D:displayname": "Four Seasons", "C:supported-calendar-component-set": "VEVENT", "tag": "VCALENDAR"}' \
-            > "$CALENDAR_DIR/.Radicale.props"
+# Create shared calendar collections on first run
+if [ -n "$RADICALE_SYNC_USER" ]; then
+    if [ -n "$FS_COOKIES" ]; then
+        CALENDAR_DIR="/data/collections/collection-root/$RADICALE_SYNC_USER/four-seasons"
+        mkdir -p "$CALENDAR_DIR"
+        if [ ! -f "$CALENDAR_DIR/.Radicale.props" ]; then
+            echo '{"D:displayname": "Four Seasons", "C:supported-calendar-component-set": "VEVENT", "tag": "VCALENDAR"}' \
+                > "$CALENDAR_DIR/.Radicale.props"
+        fi
+    fi
+    if [ -n "$WANDERLOG_COOKIE" ]; then
+        CALENDAR_DIR="/data/collections/collection-root/$RADICALE_SYNC_USER/wanderlog"
+        mkdir -p "$CALENDAR_DIR"
+        if [ ! -f "$CALENDAR_DIR/.Radicale.props" ]; then
+            echo '{"D:displayname": "Wanderlog", "C:supported-calendar-component-set": "VEVENT", "tag": "VCALENDAR"}' \
+                > "$CALENDAR_DIR/.Radicale.props"
+        fi
     fi
 fi
 

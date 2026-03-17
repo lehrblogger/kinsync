@@ -16,13 +16,14 @@ load_dotenv()
 
 FS_COOKIES = os.environ.get("FS_COOKIES", "")
 CRON_SECRET = os.environ["CRON_SECRET"]
-COOKIES_FILE = "/data/fs_cookies.txt"
+FS_COOKIES_FILE = "/data/fs_cookies.txt"
+WANDERLOG_COOKIES_FILE = "/data/wanderlog_cookies.txt"
 
 RADICALE_COLLECTIONS = "/data/collections/collection-root"
 RADICALE_SYNC_USER = os.environ["RADICALE_SYNC_USER"]
-FS_CALENDAR = os.environ.get("FS_CALENDAR", "four-seasons")
+FS_CALENDAR = "four-seasons"
 WANDERLOG_COOKIE = os.environ.get("WANDERLOG_COOKIE", "")
-WANDERLOG_CALENDAR = os.environ.get("WANDERLOG_CALENDAR", "wanderlog")
+WANDERLOG_CALENDAR = "wanderlog"
 GIT_REMOTE_URL = os.environ.get("GIT_REMOTE_URL", "")
 JSON_STORE = "/data/json"
 
@@ -445,9 +446,16 @@ def prepare_fs_events(itinerary, confirmation_number):
 
 def get_fs_cookies() -> str:
     try:
-        return Path(COOKIES_FILE).read_text().strip()
+        return Path(FS_COOKIES_FILE).read_text().strip()
     except FileNotFoundError:
         return FS_COOKIES
+
+
+def get_wanderlog_cookies() -> str:
+    try:
+        return Path(WANDERLOG_COOKIES_FILE).read_text().strip()
+    except FileNotFoundError:
+        return WANDERLOG_COOKIE
 
 
 def fs_login(session: requests.Session) -> None:
@@ -494,7 +502,7 @@ def sync_four_seasons() -> str:
         confirmation_numbers = get_fs_confirmation_numbers(session)
     except requests.HTTPError as e:
         if e.response is not None and e.response.status_code == 403:
-            return "FS cookies have expired. Update them via POST /cookies."
+            return f"FS cookies have expired. Update them via POST /cookies?calendar={FS_CALENDAR}"
         raise
 
     live = set()
@@ -535,7 +543,7 @@ def debug_four_seasons() -> dict:
 def get_wanderlog_trip_ids() -> list[str]:
     resp = requests.get(
         f"{WANDERLOG_API_URL}/myProfile",
-        headers={"Cookie": WANDERLOG_COOKIE},
+        headers={"Cookie": get_wanderlog_cookies()},
     )
     resp.raise_for_status()
     return [t["key"] for t in resp.json().get("tripPlans", []) if t.get("key")]
@@ -710,11 +718,18 @@ def _requested_calendars() -> set[str] | None:
 def cookies():
     if not hmac.compare_digest(request.headers.get("Authorization", ""), f"Bearer {CRON_SECRET}"):
         abort(401)
+    calendar = request.args.get("calendar", "").strip()
+    if calendar == FS_CALENDAR:
+        cookies_file = FS_COOKIES_FILE
+    elif calendar == WANDERLOG_CALENDAR:
+        cookies_file = WANDERLOG_COOKIES_FILE
+    else:
+        abort(400, f"Required query parameter: ?calendar={FS_CALENDAR} or ?calendar={WANDERLOG_CALENDAR}")
     value = request.get_data(as_text=True).strip()
     if not value:
         abort(400)
-    Path(COOKIES_FILE).write_text(value)
-    return "Cookies updated.\n"
+    Path(cookies_file).write_text(value)
+    return f"{calendar} cookies updated.\n"
 
 
 @app.route("/run")
