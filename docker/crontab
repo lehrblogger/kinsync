@@ -1,1 +1,1 @@
-0 * * * * root curl -sf http://localhost/run -H "Authorization: Bearer $CRON_SECRET" >> /var/log/kinsync-cron.log 2>&1
+0 * * * * root curl -sf http://localhost/run -H "Authorization: Bearer $CRON_SECRET" >> /proc/1/fd/1 2>&1
