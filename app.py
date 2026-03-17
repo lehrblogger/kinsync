@@ -8,7 +8,7 @@ import requests
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from zoneinfo import ZoneInfo
-from flask import Flask, abort, jsonify, render_template, request
+from flask import Flask, Response, abort, jsonify, render_template, request
 from dotenv import load_dotenv
 from timezonefinder import TimezoneFinder
 
@@ -21,6 +21,7 @@ WANDERLOG_COOKIES_FILE = "/data/wanderlog_cookies.txt"
 
 RADICALE_COLLECTIONS = "/data/collections/collection-root"
 RADICALE_SYNC_USER = os.environ["RADICALE_SYNC_USER"]
+ICS_SECRET = os.environ.get("ICS_SECRET", "")
 FS_CALENDAR = "four-seasons"
 WANDERLOG_COOKIE = os.environ.get("WANDERLOG_COOKIE", "")
 WANDERLOG_CALENDAR = "wanderlog"
@@ -764,3 +765,32 @@ def debug():
         result[WANDERLOG_CALENDAR] = debug_wanderlog()
 
     return jsonify(result)
+
+
+@app.route("/ical/<token>")
+def ical(token):
+    if not ICS_SECRET or not hmac.compare_digest(token, ICS_SECRET):
+        abort(404)
+
+    user_dir = Path(f"{RADICALE_COLLECTIONS}/{RADICALE_SYNC_USER}")
+    vevents = []
+    if user_dir.exists():
+        for ics_path in sorted(user_dir.glob("*/*.ics")):
+            content = ics_path.read_text()
+            in_vevent = False
+            vevent_lines = []
+            for line in content.splitlines():
+                if line.rstrip("\r") == "BEGIN:VEVENT":
+                    in_vevent = True
+                    vevent_lines = ["BEGIN:VEVENT"]
+                elif line.rstrip("\r") == "END:VEVENT":
+                    vevent_lines.append("END:VEVENT")
+                    vevents.append("\r\n".join(vevent_lines))
+                    in_vevent = False
+                elif in_vevent:
+                    vevent_lines.append(line.rstrip("\r"))
+
+    lines = ["BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//kinsync//kinsync//EN", "CALSCALE:GREGORIAN"]
+    lines.extend(vevents)
+    lines.append("END:VCALENDAR")
+    return Response("\r\n".join(lines) + "\r\n", mimetype="text/calendar")
